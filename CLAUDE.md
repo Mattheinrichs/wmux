@@ -4,7 +4,7 @@ Electron-based Windows terminal multiplexer for AI agents. TypeScript, React 19,
 
 **Owner**: amirlehmam (GitHub) — speaks French, prefers fast pragmatic solutions, tests live.
 **Repo**: github.com/amirlehmam/wmux | **Site**: wmux.org (Netlify, static from `site/`)
-**Version**: 2.27.2
+**Version**: 2.28.0
 
 ---
 
@@ -450,6 +450,7 @@ cp -r src/shell-integration/* ../wmux-release-staging/resources/shell-integratio
 rm -rf ../wmux-release-staging/resources/wmux-orchestrator && cp -r resources/wmux-orchestrator ../wmux-release-staging/resources/wmux-orchestrator
 rm -rf ../wmux-release-staging/resources/opencode-plugin && cp -r resources/opencode-plugin ../wmux-release-staging/resources/opencode-plugin   # missing from every zip until 0.47.0 → OpenCode integration silently absent in installs (issue #149)
 rm -rf ../wmux-release-staging/resources/pi-extension && cp -r resources/pi-extension ../wmux-release-staging/resources/pi-extension               # same failure mode as #149/#81: dev falls back to a repo-relative path, an install has nothing (issue #231)
+rm -rf ../wmux-release-staging/resources/omp-extension && cp -r resources/omp-extension ../wmux-release-staging/resources/omp-extension            # omp status bridge (PR #298), same failure mode
 rm -rf ../wmux-release-staging/resources/cli-bin && cp -r src/cli-bin ../wmux-release-staging/resources/cli-bin
 rm -rf ../wmux-release-staging/resources/cli-bin-ps && cp -r src/cli-bin-ps ../wmux-release-staging/resources/cli-bin-ps   # the PowerShell shim (issue #154); without it PowerShell falls back to wmux.cmd and loses argument quoting
 rm -rf ../wmux-release-staging/resources/codex-bin ../wmux-release-staging/resources/codex-bin-ps && cp -r src/codex-bin ../wmux-release-staging/resources/codex-bin && cp -r src/codex-bin-ps ../wmux-release-staging/resources/codex-bin-ps   # Codex restore PATH shims (#261); a miss only disables the feature, the launcher checks for them
@@ -531,7 +532,7 @@ rm -rf .asar-staging build-out /tmp/asar-verify ../wmux-release-staging
   `ls /tmp/asar-verify/dist/main/remote-console/runtime.js` (the facade `require`s it lazily)
 - [ ] wmux-orchestrator plugin copied to release staging
 - [ ] cli-bin + cli-bin-ps copied to release staging (issue #154), and codex-bin + codex-bin-ps (#261)
-- [ ] opencode-plugin and pi-extension copied to release staging (issues #149, #231) — `npm test` now derives this from `process.resourcesPath` usage in `src/main/`, so a new runtime resource that isn't in `extraResources` fails the release build
+- [ ] opencode-plugin, pi-extension and omp-extension copied to release staging (issues #149, #231, PR #298) — `npm test` now derives this from `process.resourcesPath` usage in `src/main/`, so a new runtime resource that isn't in `extraResources` fails the release build
 - [ ] `resources/cli/` holds all seven files — `wmux.js`, `wmux-hook.js`, `transport-deadline.js`, `wsl-network.js`, `wmux-codex.js`, `codex-relay.js`, `codex-session-tracker.js` — plus `node_modules/ws` (#261; `npm test` derives the package list from the CLI's bare imports too). The CLI is packaged file-by-file, so a shared module has to be listed on its own; `npm test` derives this from the relative imports in `src/cli/`
 - [ ] rcedit applied (icon + version metadata) — `{ rcedit }` destructured
 - [ ] `latest.yml` generated (sha512 + size of the final zip) and uploaded as a release asset — electron-updater 404s without it (issue #68)
