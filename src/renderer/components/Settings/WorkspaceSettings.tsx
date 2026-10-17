@@ -339,7 +339,7 @@ export default function WorkspaceSettings() {
       <p className="settings-hint">
         {t(
           'settings.workspacePanel.autoOpenDiffHint',
-          'When Claude edits or writes files, wmux pops a diff tab in the bottom pane. Turn this off to stop it appearing.',
+          'When an agent edits or writes files, wmux pops a diff tab in the bottom pane. Turn this off to stop it appearing.',
         )}
       </p>
 

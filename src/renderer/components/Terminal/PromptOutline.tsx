@@ -274,7 +274,7 @@ export default function PromptOutline({ surfaceId }: { surfaceId: string }) {
           <p className="prompt-outline__empty">
             {query.trim()
               ? t('prompt.outlineNoMatch', 'No prompt matches this filter.')
-              : t('prompt.outlineEmpty', 'No prompts recorded yet — wmux learns them from Claude Code’s hooks or from shell integration.')}
+              : t('prompt.outlineEmpty', 'No prompts recorded yet — wmux learns them from your agent’s hooks or from shell integration.')}
           </p>
         )}
       </div>

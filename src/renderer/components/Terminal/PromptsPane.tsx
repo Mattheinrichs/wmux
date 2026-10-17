@@ -200,6 +200,6 @@ function emptyMessage(
   }
   return t(
     'prompt.outlineEmpty',
-    'No prompts recorded yet — wmux learns them from Claude Code’s hooks or from shell integration.',
+    'No prompts recorded yet — wmux learns them from your agent’s hooks or from shell integration.',
   );
 }

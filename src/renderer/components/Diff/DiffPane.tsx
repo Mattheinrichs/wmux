@@ -369,7 +369,7 @@ export default function DiffPane({ surfaceId, cwd }: DiffPaneProps) {
             </div>
             <div>{t('diffPane.waitingForChanges', 'Waiting for changes...')}</div>
             <div className="diff-pane__empty-hint">
-              {t('diffPane.hint', 'Diffs will appear here when Claude edits files')}
+              {t('diffPane.hint', 'Diffs will appear here when an agent edits files')}
             </div>
           </div>
         )}

@@ -256,7 +256,7 @@ function markSessionIdleOnStop(
 }
 
 /**
- * Auto-open a diff tab in the workspace's BOTTOM pane when Claude edits/writes
+ * Auto-open a diff tab in the workspace's BOTTOM pane when an agent edits/writes
  * files. Opt-out via Settings → Workspace (issue #66): users who find the tab
  * popping up and stealing focus disruptive can turn it off entirely.
  */
@@ -441,7 +441,7 @@ function recordPromptSubmission(event: any): void {
   recordAgentPrompt(terminal, surfaceId, prompt, at);
 }
 
-/** Claude Code Notification (needs input) / Stop (turn finished) hook events. */
+/** Agent Notification (needs input) / Stop (turn finished) hook events — Claude Code, Grok, anything on its hooks. */
 function handleAgentLifecycleEvent(event: any, addNotification: StoreAction, t: T): void {
   const state = useStore.getState();
   const prefs = state.notificationPrefs;
@@ -466,11 +466,11 @@ function handleAgentLifecycleEvent(event: any, addNotification: StoreAction, t: 
 
   let text: string;
   if (event.event === 'Notification') {
-    text = event.message || t('app.claudeNeedsInput', 'Claude Code needs your input');
+    text = event.message || t('app.agentNeedsInput', 'An agent needs your input');
   } else {
     text = wsTitle
-      ? t('app.claudeFinishedIn', 'Claude Code finished in {workspace}').replace('{workspace}', wsTitle)
-      : t('app.claudeFinished', 'Claude Code finished');
+      ? t('app.agentFinishedIn', 'Agent finished in {workspace}').replace('{workspace}', wsTitle)
+      : t('app.agentFinished', 'Agent finished');
   }
   fireNotification(sid, wsId, text, addNotification);
 }
