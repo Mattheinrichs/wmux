@@ -1,4 +1,4 @@
-// wmux-plugin-version: 7
+// wmux-plugin-version: 8
 // wmux OpenCode plugin — bridges OpenCode hooks/events to the wmux sidebar.
 // Auto-installed by wmux to ~/.config/opencode/plugin/wmux.js.
 // No-ops entirely outside wmux (WMUX !== '1').
@@ -357,6 +357,41 @@ export const WmuxPlugin = async () => {
     releaseSession(id, true);
   }
 
+  /**
+   * The cap `wmux-hook.js` applies to Claude Code prompts (#304). A prompt
+   * travels as an argv value here rather than stdin, so it must stay well
+   * under the Windows command-line limit; 4000 is the number the other
+   * producer already uses.
+   */
+  const MAX_PROMPT = 4000;
+
+  /**
+   * One submitted user prompt, on its way to the wmux prompt log (#304).
+   *
+   * The log's only agent-side producer is a `UserPromptSubmit` hook event, and
+   * nothing on the OpenCode side used to send one. The text cannot be
+   * recovered from the screen afterwards — an agent TUI repaints over its own
+   * input box — so v2's prompt-admission hook (see setupV2) is the one moment
+   * it exists.
+   *
+   * `messageID` dedupes admission: v2 documents the hook as retry-safe, not
+   * exactly-once, and two entries would put two jump marks on one line. A
+   * missing id skips the check; the renderer's own identical-text window is
+   * the backstop.
+   */
+  const seenPrompts = new Set();
+  const reportPrompt = (text, messageID) => {
+    const clean = typeof text === "string" ? text.trim() : "";
+    if (!clean) return;
+    if (messageID) {
+      if (seenPrompts.has(messageID)) return;
+      seenPrompts.add(messageID);
+      if (seenPrompts.size > 100) seenPrompts.delete(seenPrompts.values().next().value);
+    }
+    log("prompt", { chars: clean.length });
+    wmux(["hook", "--event", "UserPromptSubmit", "--prompt", clean.slice(0, MAX_PROMPT)]);
+  };
+
   const activeTool = (input) => {
     log("tool", { tool: input && input.tool, blocked });
     clearBlocked();
@@ -374,6 +409,13 @@ export const WmuxPlugin = async () => {
     },
     "tool.execute.before": async (input) => {
       activeTool(input);
+    },
+    // v2's prompt-admission hook, registered in setupV2 (#304). v2 itself
+    // excludes synthetic messages, shell messages and compaction controls, so
+    // what arrives here is what a human submitted. v1 has no equivalent wired
+    // up; the key is inert there.
+    "session.prompt": async ({ prompt, messageID } = {}) => {
+      reportPrompt(prompt && prompt.text, messageID);
     },
     // `sessionSource` is v2's raw event (see setupV2): the session facts live
     // on events it has no other use for, which `fromV2Event` maps to null.
@@ -512,6 +554,10 @@ async function setupV2(ctx) {
   await register("shell", "create.before", (e) => {
     if (e && e.env) return hooks["shell.env"]({}, { env: e.env });
   });
+  // Prompt admission (#304). A v2 build that renames or lacks the hook loses
+  // the prompt log, never its own startup — the register() guard already
+  // reports it to the debug log.
+  await register("session", "prompt", (e) => hooks["session.prompt"](e));
 
   const controller = new AbortController();
   const task = (async () => {

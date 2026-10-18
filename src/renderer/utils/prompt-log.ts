@@ -146,6 +146,28 @@ function applyViews(terminal: Terminal, entry: PromptEntry): void {
 }
 
 /**
+ * Which surface a hook event belongs to (issue #304).
+ *
+ * One `hook.event`, two producers, two spellings of "which pane": Claude Code's
+ * `wmux-hook.js` talks JSON-RPC itself and sends `surfaceId`; the OpenCode
+ * plugin goes through `wmux hook`, whose transport stamps the calling pane as
+ * `caller` — the same `$WMUX_SURFACE_ID` the browser verbs route by (issue
+ * #62).
+ *
+ * The two are deliberately NOT collapsed any earlier than here. Main's hook
+ * consumers gate on `surfaceId`, and only some of them want this event: a v2
+ * OpenCode `UserPromptSubmit` has no `Stop` behind it, so the declared-state
+ * bridge would set `runDepth: 1` and leave it there — the pane reading
+ * "working" for the full trust window after every prompt. The prompt log is
+ * the one consumer that does want it, and it asks here.
+ */
+export function hookEventSurface(event: { surfaceId?: unknown; caller?: unknown } | null | undefined): string {
+  const explicit = typeof event?.surfaceId === 'string' ? event.surfaceId : '';
+  if (explicit) return explicit;
+  return typeof event?.caller === 'string' ? event.caller : '';
+}
+
+/**
  * A user prompt submitted to an in-pane agent.
  *
  * `text` is the only free-text body wmux forwards from a hook payload besides a

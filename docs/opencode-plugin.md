@@ -25,6 +25,7 @@ consent deletes it again.
 | `file.edited` | active, and refreshes the diff view |
 | `session.idle` | done |
 | `session.error` | done, and unblocked |
+| prompt admission, v2 (`ctx.session.hook("prompt")`) | the user's submitted prompt enters the **prompt log** — highlight, outline, `wmux prompts` |
 
 **`message.part.updated` never unblocks a pane.** That looks like a missing
 self-heal and is deliberate: OpenCode emits one for the ask's *own* tool part
@@ -36,6 +37,30 @@ The self-heal that mattered — never leaving a pane stuck on "Needs you" if
 OpenCode fails to emit a matching `*.replied` — still holds through
 `tool.execute.before`/`.after`, the reply events, and `session.error`. All of
 those mean the agent actually moved on.
+
+---
+
+## The prompt log
+
+Since plugin version 8 ([#304][304]) a submitted prompt also reaches the prompt
+log. The v2 plugin registers `ctx.session.hook("prompt")`, reads
+`event.prompt.text`, and calls `wmux hook --event UserPromptSubmit --prompt …` —
+the same event Claude Code's `UserPromptSubmit` hook produces, which is what
+fills the prompt outline, the Prompts pane and `wmux prompts`. Before this the
+log stayed empty for every OpenCode pane, because the shell integration's
+OSC 133 marks end when a TUI takes the screen and nothing else ever sent the
+event.
+
+- The text is capped at 4000 chars, the same `MAX_PROMPT` `wmux-hook.js` uses.
+- `event.messageID` dedupes admission: OpenCode documents the hook as
+  retry-safe but not exactly-once, and two entries would put two jump marks on
+  one line. A missing id falls back to the renderer's own identical-text window.
+- OpenCode runs the hook for prompts a human submitted; synthetic messages,
+  shell messages and compaction controls are excluded by OpenCode itself.
+- Same shared-server caveat as the session handle below: on
+  `opencode serve --service` the plugin's pane is the one that started the
+  server.
+- v1 gets no prompt log; only the v2 half registers the hook.
 
 ---
 
@@ -123,3 +148,4 @@ neither overwritten nor removed.
 [189]: https://github.com/amirlehmam/wmux/issues/189
 [190]: https://github.com/amirlehmam/wmux/issues/190
 [290]: https://github.com/amirlehmam/wmux/issues/290
+[304]: https://github.com/amirlehmam/wmux/issues/304
