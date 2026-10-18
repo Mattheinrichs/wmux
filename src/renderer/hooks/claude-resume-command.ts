@@ -4,6 +4,8 @@
 // a DOM and a PTY bridge. Everything here is pure except the module-level
 // guard, which is the one piece that genuinely has to be process-wide.
 
+import { mergeResume, type ResumableAgent } from './agent-launcher';
+
 /** Mirrors CLAUDE_SESSION_ID_RE in src/main/claude-resume.ts. */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 
@@ -32,14 +34,38 @@ export function hasResumed(surfaceId: string): boolean {
 }
 
 /**
- * The startup commands a freshly created PTY should run, with the stored Claude
- * resume appended when this surface has one and the user opted in.
+ * The resume folded into a surface's commands, or `base` untouched.
  *
- * Appended, not prepended: a quick-launch profile's own commands are setup for
- * the shell (activate a venv, cd somewhere), and `claude --resume` does not
- * return to the prompt — it takes over the terminal. Anything queued after it
- * would be typed into Claude's input box instead of run by the shell. Setup
- * first, resume last, is the only order where both still mean what they say.
+ * The once-per-surface guard lives here rather than in each provider branch: a
+ * surface spends its one resume only when something is actually about to be
+ * typed, so a base that ends up unchanged (a different agent's launcher, #302)
+ * leaves the handle available for a later create.
+ */
+function applyResume(
+  base: string[] | undefined,
+  surfaceId: string,
+  agent: ResumableAgent,
+  id: string,
+): string[] | undefined {
+  if (resumedSurfaces.has(surfaceId)) return base;
+  const next = mergeResume(base, agent, id);
+  if (!next) return base;
+  resumedSurfaces.add(surfaceId);
+  return next;
+}
+
+/**
+ * The startup commands a freshly created PTY should run, with the stored resume
+ * for whichever provider has a handle on this surface.
+ *
+ * Where the resume goes depends on the pane's own commands (#302). A
+ * quick-launch profile's commands are usually setup for the shell (activate a
+ * venv, cd somewhere), and the resume is then appended: `claude --resume` does
+ * not return to the prompt — it takes over the terminal — so anything queued
+ * after it would be typed into Claude's input box. When one of those commands
+ * IS the launcher, the resume is merged into it instead, keeping its name and
+ * flags, and when it launches a different agent nothing is added at all. See
+ * agent-launcher.ts.
  *
  * Returns `base` unchanged (same reference) whenever it decides not to resume,
  * so a caller can tell "nothing added" from "added" by identity.
@@ -66,23 +92,17 @@ export function withClaudeResume(opts: {
     // Mirrors OPENCODE_SESSION_ID_RE in src/main/opencode-resume.ts — re-checked
     // because session.json is a file the user can edit.
     if (!/^ses_[A-Za-z0-9]{8,120}$/.test(opts.opencodeSessionId)) return base;
-    if (resumedSurfaces.has(surfaceId)) return base;
-    resumedSurfaces.add(surfaceId);
-    return [...(base ?? []), `opencode -s ${opts.opencodeSessionId}`];
+    return applyResume(base, surfaceId, 'opencode', opts.opencodeSessionId);
   }
   if (opts.codexSessionId) {
     // Mixed provider state is ambiguous: never type a second agent into a TUI.
     if (claudeSessionId || !opts.codexEnabled || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(opts.codexSessionId)) return base;
-    if (resumedSurfaces.has(surfaceId)) return base;
-    resumedSurfaces.add(surfaceId);
-    return [...(base ?? []), `codex resume ${opts.codexSessionId}`];
+    return applyResume(base, surfaceId, 'codex', opts.codexSessionId);
   }
   if (!enabled || !claudeSessionId) return base;
   // Re-validated here even though the main process validates on the way in:
   // this value round-tripped through session.json, which is a file on disk the
   // user can edit, and it is about to become a command line.
   if (!SESSION_ID_RE.test(claudeSessionId)) return base;
-  if (resumedSurfaces.has(surfaceId)) return base;
-  resumedSurfaces.add(surfaceId);
-  return [...(base ?? []), `claude --resume ${claudeSessionId}`];
+  return applyResume(base, surfaceId, 'claude', claudeSessionId);
 }

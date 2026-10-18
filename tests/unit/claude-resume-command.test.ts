@@ -70,4 +70,28 @@ describe('withClaudeResume', () => {
     call({ claudeSessionId: 'nope' });
     expect(call()).toEqual([`claude --resume ${ID}`]);
   });
+
+  // ─── #302: a pane whose startup command IS the agent launcher ─────────────
+  //
+  // Appending here typed the resume into the agent's own TUI — the launcher
+  // takes the terminal before the next line runs. The resume now rides on the
+  // launcher's command line, so the pane's name and flags survive too.
+
+  it('merges the resume into the pane\'s own launcher instead of adding a line', () => {
+    const base = ['opencode2 --server https://code.homenode.stream'];
+    expect(call({ base, claudeSessionId: undefined, opencodeSessionId: 'ses_abc12345', opencodeEnabled: true }))
+      .toEqual(['opencode2 --server https://code.homenode.stream -s ses_abc12345']);
+  });
+
+  it('merges a claude resume into a claude launcher, flags kept', () => {
+    expect(call({ base: ['nvm use', 'claude --model sonnet'] }))
+      .toEqual(['nvm use', `claude --model sonnet --resume ${ID}`]);
+  });
+
+  it('adds nothing when the pane launches a different agent', () => {
+    const base = ['claude'];
+    expect(call({ base, claudeSessionId: undefined, opencodeSessionId: 'ses_abc12345', opencodeEnabled: true })).toBe(base);
+    // Nothing was typed, so the handle is still available for a later create.
+    expect(hasResumed('surf-1')).toBe(false);
+  });
 });
