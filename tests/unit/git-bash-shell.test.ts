@@ -53,6 +53,11 @@ describe('isWslBashLauncher', () => {
     expect(isWslBashLauncher('D:\\Win\\System32\\bash.exe', 'D:\\Win')).toBe(true);
   });
 
+  it('flags the exe behind the alias too, now that PATH aliases are resolved (#299)', () => {
+    expect(isWslBashLauncher('C:\\Program Files\\WindowsApps\\MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.1.0_x64__8wekyb3d8bbwe\\bash.exe')).toBe(true);
+    expect(isWslBashLauncher('C:\\Program Files\\WindowsApps\\Pkg_1.0_x64__x\\sub\\bash.exe')).toBe(false);
+  });
+
   it('does not flag a real bash', () => {
     expect(isWslBashLauncher(GIT_BASH)).toBe(false);
     expect(isWslBashLauncher('C:\\Program Files\\Git\\usr\\bin\\bash.exe')).toBe(false);

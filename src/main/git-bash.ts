@@ -49,7 +49,10 @@ export function bashAlias(spec: string): 'bash' | 'git-bash' | null {
 export function isWslBashLauncher(p: string, systemRoot = 'C:\\Windows'): boolean {
   const norm = path.win32.normalize(p).toLowerCase();
   if (norm === path.win32.join(systemRoot, 'System32', 'bash.exe').toLowerCase()) return true;
-  return /\\windowsapps\\bash\.exe$/.test(norm);
+  // The alias itself, or (since #299 resolves aliases found on PATH to the
+  // exe behind them) that exe one package directory down. Git for Windows
+  // never installs under a WindowsApps tree.
+  return /\\windowsapps\\(?:[^\\]+\\)?bash\.exe$/.test(norm);
 }
 
 /**

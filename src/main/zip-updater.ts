@@ -192,6 +192,23 @@ function isOlderThan(stat: fs.Stats, now: number, maxAgeMs: number): boolean {
   return now - stat.mtimeMs > maxAgeMs;
 }
 
+/** The keep rules of `sweepUpdateLeftovers`, in order; any one of them keeps the entry. */
+function mustKeepLeftover(
+  entry: LeftoverEntry,
+  now: number,
+  maxAgeMs: number,
+  protectedPids: ReadonlySet<number>,
+  alive: (pid: number) => boolean,
+): boolean {
+  const { stat } = entry;
+  if (!stat || stat.isSymbolicLink()) return true;
+  const typeMatches = entry.kind === 'extract-dir' ? stat.isDirectory() : stat.isFile();
+  if (!typeMatches) return true;
+  if (!isOlderThan(stat, now, maxAgeMs)) return true;
+  if (entry.kind !== 'helper' && protectedPids.has(entry.pid)) return true;
+  return alive(entry.pid);
+}
+
 /**
  * Removes update leftovers from `tmpDir`. Every rule fails towards keeping:
  *
@@ -232,13 +249,7 @@ export async function sweepUpdateLeftovers(tmpDir: string, deps: Partial<SweepDe
 
   // Pass 2: the first rule that says keep wins.
   for (const entry of entries) {
-    const { stat } = entry;
-    if (!stat || stat.isSymbolicLink()) continue;
-    const typeMatches = entry.kind === 'extract-dir' ? stat.isDirectory() : stat.isFile();
-    if (!typeMatches) continue;
-    if (!isOlderThan(stat, now, maxAgeMs)) continue;
-    if (entry.kind !== 'helper' && protectedPids.has(entry.pid)) continue;
-    if (alive(entry.pid)) continue;
+    if (mustKeepLeftover(entry, now, maxAgeMs, protectedPids, alive)) continue;
     try {
       await fs.promises.rm(entry.full, { recursive: entry.kind === 'extract-dir', force: true });
       result.removed.push(entry.name);
@@ -296,6 +307,21 @@ export function buildApplyUpdateCmd(): string {
     'echo   This window closes by itself. Leave it open; nothing to type here.',
     'echo.',
     'echo   Waiting for wmux to close...',
+    // The liveness probe goes through a FILE, never a pipe (#300). With
+    // `tasklist | findstr`, findstr returns only on EOF, and EOF only comes
+    // once every copy of the pipe's write end is closed. On the reporter's
+    // machine (zh-TW, Windows Terminal as default terminal) one of them
+    // outlived tasklist: findstr sat on one PID for minutes, the old wmux long
+    // gone, and the update never landed — on three releases in a row. Reading
+    // a file, findstr stops at its end whoever else is alive. Same name as the
+    // payload's pid so two helpers never share one, and deleted after the loop.
+    'set "LIST=%TEMP%\\wmux-update-wait-%PID%.txt"',
+    // And the wait is bounded, so no probe that misbehaves in a way not yet
+    // seen can hold this window open forever. wmux's own exit watchdog kills a
+    // wedged quit within ~20 s, so ~2 minutes of a live pid means something
+    // else is wrong: skip the copy (never write over a running install) and
+    // keep the payload, since the next attempt needs it.
+    'set /a WAITED=0',
     ':wait',
     'title wmux update',
     // waitfor, not timeout: this script is spawned with stdio 'ignore', so its
@@ -308,8 +334,15 @@ export function buildApplyUpdateCmd(): string {
     // helper is trying not to have. Where waitfor.exe is absent the loop
     // degrades to the spin it already had, never to a wrong answer.
     '"%SYS%\\waitfor.exe" /t 1 wmuxUpdateWait >nul 2>nul',
-    '"%SYS%\\tasklist.exe" /FI "PID eq %PID%" 2>nul | "%SYS%\\findstr.exe" /I /C:" %PID% " >nul',
-    'if not errorlevel 1 goto wait',
+    '"%SYS%\\tasklist.exe" /FI "PID eq %PID%" >"%LIST%" 2>nul',
+    '"%SYS%\\findstr.exe" /I /C:" %PID% " "%LIST%" >nul 2>nul',
+    'if errorlevel 1 goto waited',
+    'set /a WAITED+=1',
+    'if %WAITED% LSS 120 goto wait',
+    'set "SKIPCOPY=wmux did not close within two minutes"',
+    'set "KEEPSRC=1"',
+    ':waited',
+    'del "%LIST%" >nul 2>nul',
     '"%SYS%\\waitfor.exe" /t 2 wmuxUpdateWait >nul 2>nul',
     'title wmux update',
     // The wait happens whatever SKIPCOPY says. It costs a second or two
@@ -408,7 +441,8 @@ export function buildHelperArgs(helper: string, args: string[]): string[] {
   if (parts.some((p) => /%[^%]*%/.test(p))) {
     throw new Error('update helper argument contains a %…% pair that cmd.exe would expand');
   }
-  return ['/d', '/s', '/c', `"${parts.map((p) => `"${p}"`).join(' ')}"`];
+  const quoted = parts.map((p) => '"' + p + '"').join(' ');
+  return ['/d', '/s', '/c', `"${quoted}"`];
 }
 
 function system32(name: string): string {

@@ -298,6 +298,58 @@ describe('buildApplyUpdateCmd', () => {
     expect(cmd.indexOf('waitfor.exe')).toBeLessThan(cmd.indexOf('tasklist.exe'));
   });
 
+  // Issue #300: `tasklist | findstr` waits for EOF on a pipe, and on the
+  // reporter's machine something outlived tasklist holding its write end —
+  // findstr sat on one PID for minutes after wmux had gone, three releases in a
+  // row. The probe now reads a file, and the wait has an upper bound.
+  it('probes liveness through a file, never a pipe, and bounds the wait', () => {
+    const lines = cmd.split('\r\n');
+    const loop = lines.slice(lines.indexOf(':wait'), lines.indexOf(':waited'));
+    expect(loop.length).toBeGreaterThan(0);
+    expect(loop.some((l) => l.includes('|'))).toBe(false);
+    expect(cmd).toContain('"%SYS%\\tasklist.exe" /FI "PID eq %PID%" >"%LIST%" 2>nul');
+    expect(cmd).toContain('"%SYS%\\findstr.exe" /I /C:" %PID% " "%LIST%" >nul 2>nul');
+    expect(cmd).toContain('if %WAITED% LSS 120 goto wait');
+    // A timed-out wait must not copy over what may be a live install, and the
+    // payload is kept for the next attempt.
+    const timeout = lines.indexOf('set "SKIPCOPY=wmux did not close within two minutes"');
+    expect(timeout).toBeGreaterThan(lines.indexOf(':wait'));
+    expect(lines[timeout + 1]).toBe('set "KEEPSRC=1"');
+    expect(cmd).toContain('del "%LIST%" >nul 2>nul');
+  });
+
+  // Run for real: the reports this helper has had were all about what cmd.exe
+  // actually does, never about what the text says.
+  it.skipIf(process.platform !== 'win32')('waits for the pid, copies the payload and leaves no wait file', async () => {
+    const root = tempDir();
+    const src = path.join(root, 'payload');
+    const dst = path.join(root, 'install');
+    fs.mkdirSync(src);
+    fs.mkdirSync(dst);
+    fs.writeFileSync(path.join(src, 'wmux.exe'), 'new');
+    fs.writeFileSync(path.join(dst, 'wmux.exe'), 'old');
+    const helper = path.join(root, 'helper.cmd');
+    fs.writeFileSync(helper, buildApplyUpdateCmd());
+    const { spawn } = await vi.importActual<typeof import('child_process')>('child_process');
+    // Stands in for the old wmux: alive for ~2 s, then gone.
+    const old = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 2000)'], { stdio: 'ignore', windowsHide: true });
+    const oldPid = old.pid!;
+    // rundll32 with no arguments exits at once and shows nothing — a relaunch
+    // that does not open a window in the middle of a test run.
+    const relaunch = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'rundll32.exe');
+    const started = Date.now();
+    const code = await new Promise<number | null>((resolve) => {
+      const child = spawn('cmd.exe', buildHelperArgs(helper, [String(oldPid), src, dst, relaunch]), {
+        windowsVerbatimArguments: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, TEMP: root },
+      });
+      child.on('exit', resolve);
+    });
+    expect(code).toBe(0);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
+    expect(fs.readFileSync(path.join(dst, 'wmux.exe'), 'utf8')).toBe('new');
+    expect(fs.existsSync(path.join(root, `wmux-update-wait-${oldPid}.txt`))).toBe(false);
+  }, 60_000);
+
   it('does not embed caller paths — those arrive as arguments', () => {
     expect(cmd).not.toMatch(/C:\\/);
     expect(cmd).toContain('set "PID=%~1"');

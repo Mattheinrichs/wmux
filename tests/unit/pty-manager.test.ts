@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { PtyManager, parseShellSpec, resolveSpawnCwd, resolveShellForCwd, resolveExistingShellPath, comparePackageVersion, shellEnv, shellProbe, resetShellPathCache } from '../../src/main/pty-manager';
+import { PtyManager, parseShellSpec, resolveSpawnCwd, resolveShellForCwd, resolveExistingShellPath, comparePackageVersion, appExecAliasTarget, shellEnv, shellProbe, resetShellPathCache } from '../../src/main/pty-manager';
 import type { SurfaceId } from '../../src/shared/types';
 
 const TEST_SHELL = 'cmd.exe';
@@ -350,6 +350,55 @@ describe('resolveExistingShellPath', () => {
     expect(fs.existsSync(resolved)).toBe(true);
     expect(resolved.toLowerCase()).not.toContain('\\windowsapps\\pwsh-preview');
     expect(path.basename(resolved).toLowerCase()).toBe('pwsh.exe');
+  });
+});
+
+/**
+ * Issue #299: a shell spec saved as the App Execution Alias of a Store-only
+ * PowerShell (`%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`, which is what
+ * `where pwsh.exe` returns there) read as "not found": existsSync cannot open an
+ * AppExecLink, and %ProgramFiles%\WindowsApps is not listable by a normal user,
+ * so every pane fell back to Windows PowerShell 5.1.
+ */
+describe('appExecAliasTarget (issue #299)', () => {
+  const ALIAS = 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe';
+  const TARGET = 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.7.0_x64__8wekyb3d8bbwe\\pwsh.exe';
+  const io = (over: Record<string, unknown> = {}) => ({
+    lstat: () => ({ isSymbolicLink: () => true }),
+    readlink: () => TARGET,
+    exists: (p: string) => p === TARGET,
+    ...over,
+  });
+
+  it('answers the exe behind an alias', () => {
+    expect(appExecAliasTarget(ALIAS, io())).toBe(TARGET);
+  });
+
+  it('answers nothing for a plain file, a missing path, a dead target or a relative link', () => {
+    expect(appExecAliasTarget(ALIAS, io({ lstat: () => ({ isSymbolicLink: () => false }) }))).toBeUndefined();
+    expect(appExecAliasTarget(ALIAS, io({ lstat: () => { throw Object.assign(new Error('gone'), { code: 'ENOENT' }); } }))).toBeUndefined();
+    expect(appExecAliasTarget(ALIAS, io({ exists: () => false }))).toBeUndefined();
+    expect(appExecAliasTarget(ALIAS, io({ readlink: () => 'pwsh.exe' }))).toBeUndefined();
+  });
+
+  // Against a real alias too, because the whole bug is what Windows answers for one.
+  const winget = process.platform === 'win32' && process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'winget.exe')
+    : '';
+  const hasAlias = !!winget && (() => { try { return fs.lstatSync(winget).isSymbolicLink(); } catch { return false; } })();
+
+  it.skipIf(!hasAlias)('resolves a real alias that existsSync refuses, and resolveExistingShellPath accepts it', () => {
+    expect(fs.existsSync(winget)).toBe(false);
+    const target = appExecAliasTarget(winget);
+    expect(target).toBeTruthy();
+    expect(fs.existsSync(target!)).toBe(true);
+    resetShellPathCache();
+    expect(resolveExistingShellPath(winget)).toBe(target);
+    resetShellPathCache();
+  });
+
+  it.skipIf(!hasAlias)('keeps an absolute alias spec whole rather than splitting it', () => {
+    expect(parseShellSpec(winget)).toEqual({ command: winget, args: [] });
   });
 });
 

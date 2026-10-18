@@ -36,12 +36,62 @@ export function isPtyCrashGuardInstalled(): boolean {
 // node-pty's Windows SearchPath concatenates PATH + the bare name and then
 // GetFileAttributes — App Execution Aliases (0-byte WindowsApps reparse
 // points) fail that check, so spawn('pwsh-preview') throws "File not found: "
-// with an empty path. `where` finds those aliases; fs.existsSync does not.
+// with an empty path. `where` finds those aliases; fs.existsSync does not, so
+// an alias is resolved to the exe behind it (appExecAliasTarget, #299).
 // Fall back through: requested shell → pwsh.exe → powershell.exe → cmd.exe
 
 let cachedDefaultShell: string | null = null;
 
-/** First `where`/`which` hit that is a real file (skips WindowsApps aliases). */
+/** The fs calls `appExecAliasTarget` makes, injectable so a test needs no real alias. */
+export interface AliasIo {
+  lstat: (p: string) => { isSymbolicLink(): boolean };
+  readlink: (p: string) => string;
+  exists: (p: string) => boolean;
+}
+
+const aliasIo: AliasIo = {
+  lstat: (p) => fs.lstatSync(p),
+  readlink: (p) => fs.readlinkSync(p),
+  exists: (p) => fs.existsSync(p),
+};
+
+/**
+ * The real exe behind an App Execution Alias, or undefined (#299).
+ *
+ * An alias (`%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`) is an
+ * IO_REPARSE_TAG_APPEXECLINK reparse point. `fs.existsSync` and `fs.statSync`
+ * try to OPEN it, which Windows refuses with EACCES, so every check here read
+ * it as "not installed" — but it is what `where pwsh.exe`, and therefore the
+ * shell detector behind Settings, hands back for a Store-only PowerShell. A
+ * spec saved as that path fell back to Windows PowerShell 5.1 on every pane.
+ * libuv's readlink DOES decode an AppExecLink and returns the versioned exe
+ * inside the package (`%ProgramFiles%\WindowsApps\Microsoft.PowerShell_<ver>…`),
+ * which a normal user can run even though they cannot LIST that directory —
+ * which is also why `findStorePwsh` misses on most machines.
+ *
+ * The spec keeps the alias spelling; only the spawn uses the target. The alias
+ * survives a Store update, the versioned directory does not, and the memoized
+ * hit is re-validated with existsSync so an update re-resolves it.
+ */
+export function appExecAliasTarget(p: string, io: AliasIo = aliasIo): string | undefined {
+  try {
+    if (!io.lstat(p).isSymbolicLink()) return undefined;
+    const target = io.readlink(p);
+    // An AppExecLink target is always absolute. A relative one is an ordinary
+    // symlink, which existsSync already followed — nothing to add here.
+    if (!path.isAbsolute(target)) return undefined;
+    return io.exists(target) ? target : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `p` if it is a real file, the exe behind it if it is an App Execution Alias. */
+function spawnablePath(p: string): string | undefined {
+  return fs.existsSync(p) ? p : appExecAliasTarget(p);
+}
+
+/** First `where`/`which` hit node-pty can spawn (an alias resolves to its exe). */
 function firstExistingOnPath(name: string): string | undefined {
   try {
     const cmd = process.platform === 'win32' ? 'where' : 'which';
@@ -58,7 +108,11 @@ function firstExistingOnPath(name: string): string | undefined {
       .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean);
-    return hits.find((p) => fs.existsSync(p));
+    for (const hit of hits) {
+      const real = spawnablePath(hit);
+      if (real) return real;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -196,7 +250,10 @@ function codexShimDirsForPane(
 }
 
 function resolveExistingShellPathUncached(shell: string): string | undefined {
-  if (path.isAbsolute(shell) && fs.existsSync(shell)) return shell;
+  if (path.isAbsolute(shell)) {
+    const real = spawnablePath(shell);
+    if (real) return real;
+  }
 
   const win32 = process.platform === 'win32';
   const base = win32 ? path.basename(shell).toLowerCase().replace(/\.exe$/, '') : '';
@@ -286,7 +343,9 @@ export function resolveShell(shell: string | undefined): string {
 export function parseShellSpec(spec: string | undefined): { command: string; args: string[] } {
   const trimmed = (spec || '').trim();
   if (!trimmed) return { command: '', args: [] };
-  if (path.isAbsolute(trimmed) && fs.existsSync(trimmed)) {
+  // An alias counts as existing (#299): a "First Last" account puts a space in
+  // %LOCALAPPDATA%, and a split there would turn the alias into a command line.
+  if (path.isAbsolute(trimmed) && spawnablePath(trimmed)) {
     return { command: trimmed, args: [] };
   }
   if (!/\s/.test(trimmed)) return { command: trimmed, args: [] };
