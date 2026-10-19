@@ -90,6 +90,11 @@ wmux opencode-tui --remove   # remove, only when the file carries our marker
 - It is not installed automatically and does not need a wmux restart. Re-run
   the command after upgrading wmux: it compares the `// wmux-plugin-version:`
   marker on `tui.js` and rewrites both files when the shipped version differs.
+- **Keep backups outside `plugins/`.** OpenCode loads *every* directory under
+  `<config>/plugins/` as a plugin, so a copy such as
+  `plugins/wmux-cli.bak/tui.js` registers the same `wmux.cli` id, shadows the
+  live one, and the symptom is silence: no `init` line and no reports. Move an
+  old copy to `~/wmux-cli.bak` instead of leaving it beside the plugin.
 - **What it reports today** (issue #310): the viewed session handle —
   `wmux report-session <id> --provider opencode` — so *Resume OpenCode sessions
   on restore* works for remote/shared setups. The viewed tab is followed
