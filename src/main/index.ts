@@ -62,6 +62,7 @@ import {
   listKnownTranscriptIds,
 } from './claude-resume';
 import { pruneDeadQwenSessions, listKnownQwenSessionIds } from './qwen-resume';
+import { pruneDeadOmpSessions } from './omp-resume';
 import { sessionWindows, MAX_RESTORED_WINDOWS } from './session-windows';
 import { WindowManager, appIconCandidates } from './window-manager';
 import { initAutoUpdater, requestUpdateNow, getUpdateState } from './updater';
@@ -341,7 +342,7 @@ function routeSpecialV2(
   // release is `pane.release_agent`, sent by its SessionEnd hook as the PTY
   // dies, and gets the same refusal.
   if ((request.method === 'pane.release_codex_session' || request.method === 'pane.release_opencode_session' ||
-       request.method === 'pane.release_agent') && isQuitting) {
+       request.method === 'pane.release_omp_session' || request.method === 'pane.release_agent') && isQuitting) {
     respond({ released: false });
     return true;
   }
@@ -1350,6 +1351,21 @@ function pruneRestoredClaudeSessions(windows: SavedWindow[]): void {
     console.log(`[claude-resume] dropped ${dropped} session id(s) with no transcript`);
   }
 }
+function pruneRestoredOmpSessions(windows: SavedWindow[]): void {
+  if (windows.length === 0) return;
+  let dropped = 0;
+  for (const state of windows) {
+    for (const ws of state.workspaces ?? []) {
+      const result = pruneDeadOmpSessions(ws.splitTree);
+      ws.splitTree = result.tree;
+      dropped += result.dropped;
+    }
+  }
+  if (dropped > 0) {
+    console.log(`[omp-resume] dropped ${dropped} session id(s) with no session file`);
+  }
+}
+
 
 /** The same pruning for Qwen Code: a `qwen --resume` of a deleted session exits 1. */
 function pruneRestoredQwenSessions(windows: SavedWindow[]): void {
@@ -1535,6 +1551,7 @@ app.whenReady().then(() => {
   const savedWindows = (savedSession?.windows ?? []).slice(0, MAX_RESTORED_WINDOWS);
   pruneRestoredClaudeSessions(savedWindows);
   pruneRestoredQwenSessions(savedWindows);
+  pruneRestoredOmpSessions(savedWindows);
   if (savedWindows.length === 0) {
     sessionWindows.markStartup(windowManager.createWindow());
   } else {

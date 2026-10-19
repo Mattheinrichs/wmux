@@ -34,6 +34,7 @@ import { isValidCodexSessionId } from './codex-resume';
 import { isValidOpencodeSessionId } from './opencode-resume';
 import { isValidAgyConversationId } from './agy-resume';
 import { isValidQwenSessionId } from './qwen-resume';
+import { isValidOmpSessionId } from './omp-resume';
 import { resolveWireChoiceId } from '../shared/remote-console-protocol';
 
 export type AgentRunState = 'blocked' | 'working' | 'idle' | 'unknown';
@@ -444,16 +445,17 @@ export function reportAgent(surfaceId: SurfaceId, params: ReportAgentParams): Ag
 }
 
 /** Who a session handle belongs to — it decides the validator and the restore command. */
-export type AgentSessionProvider = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen';
+export type AgentSessionProvider = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen' | 'omp';
 const SESSION_VALIDATORS: Record<AgentSessionProvider, (id: unknown) => id is string> = {
   claude: isValidClaudeSessionId,
   codex: isValidCodexSessionId,
   opencode: isValidOpencodeSessionId,
   agy: isValidAgyConversationId,
   qwen: isValidQwenSessionId,
+  omp: isValidOmpSessionId,
 };
 function isSessionProvider(value: unknown): value is AgentSessionProvider {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'agy' || value === 'qwen';
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'agy' || value === 'qwen' || value === 'omp';
 }
 
 /** `pane.report_agent_session` — tie the pane to a resumable session handle. */

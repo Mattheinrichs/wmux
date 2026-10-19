@@ -15,7 +15,45 @@
 //
 // Pure: no Electron, no Node, exercised straight from vitest.
 
-export type ResumableAgent = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen';
+export type ResumableAgent = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen' | 'omp';
+
+/** Which quoting rules a pane's shell applies to the resume it is typed. */
+export type ShellFamily = 'powershell' | 'posix' | 'cmd';
+
+export function detectShellFamily(shell?: string, samplePath?: string): ShellFamily {
+  if (!shell) {
+    return samplePath?.startsWith('/') ? 'posix' : 'powershell';
+  }
+  const lower = shell.toLowerCase();
+  if (/\b(pwsh|powershell)\b/.test(lower)) return 'powershell';
+  if (/\b(cmd|command)\b/.test(lower)) return 'cmd';
+  if (/\b(bash|zsh|sh|wsl|dash|ash)\b/.test(lower)) return 'posix';
+  return samplePath?.startsWith('/') ? 'posix' : 'powershell';
+}
+
+/**
+ * Shell-aware quoting for omp session paths:
+ * - PowerShell: single quotes with '' escaping (verbatim: no $ or ` expansion)
+ * - POSIX (bash/zsh/sh/wsl): single quotes with '\'' escaping
+ * - cmd.exe: double quotes (cmd expands %VAR%, does not support single quotes)
+ */
+export function quoteOmpArg(id: string, shell?: string): string | null {
+  const family = detectShellFamily(shell, id);
+  if (family === 'powershell') {
+    // PowerShell also closes a single-quoted string on the typographic quotes
+    // U+2018-U+201B; doubling escapes each of them like a plain '.
+    return `'${id.replace(/['‘’‚‛]/g, '$&$&')}'`;
+  }
+  if (family === 'posix') {
+    return `'${id.replace(/'/g, "'\\''")}'`;
+  }
+  // cmd.exe expands %VAR% even inside quotes and has no escape for a double
+  // quote inside one, so a path carrying either is refused rather than typed.
+  if (id.includes('%') || id.includes('"')) {
+    return null;
+  }
+  return `"${id}"`;
+}
 
 /**
  * The agents wmux can resume, how each takes a stored handle, and the
@@ -32,8 +70,10 @@ const RESUMABLE = {
   opencode: { executable: /^opencode\d*$/, args: (id: string) => `-s ${id}` },
   agy: { executable: /^agy\d*$/, args: (id: string) => `--conversation ${id}` },
   qwen: { executable: /^(qwen|qwen-code)\d*$/, args: (id: string) => `--resume ${id}` },
+  // Never called for omp: its handle is a path, which mergeResume quotes for
+  // the pane's own shell (mergeOmpResume).
+  omp: { executable: /^omp\d*$/, args: (id: string) => `--resume ${id}` },
 } satisfies Record<ResumableAgent, { executable: RegExp; args: (id: string) => string }>;
-
 /** The command typed when nothing in the pane launches an agent. */
 const LAUNCH_COMMAND: Record<ResumableAgent, string> = {
   claude: 'claude --resume',
@@ -41,6 +81,7 @@ const LAUNCH_COMMAND: Record<ResumableAgent, string> = {
   opencode: 'opencode -s',
   agy: 'agy --conversation',
   qwen: 'qwen --resume',
+  omp: 'omp --resume',
 };
 
 /** Wrappers a launcher can hide behind: `npx -y opencode`, `pnpm dlx codex`. */
@@ -133,6 +174,124 @@ export function lastAgentLauncher(commands: readonly string[]): { index: number;
   return undefined;
 }
 
+/** A whitespace-separated token of a command line, quotes kept, with its offsets. */
+interface CommandSpan {
+  start: number;
+  end: number;
+  raw: string;
+}
+
+/** Where the token starting at `i` ends. A quoted run may hold spaces. */
+function tokenEnd(command: string, i: number): number {
+  let end = i;
+  while (end < command.length && !/\s/.test(command[end])) {
+    const ch = command[end];
+    end++;
+    if (ch !== '"' && ch !== "'") continue;
+    const close = command.indexOf(ch, end);
+    end = close === -1 ? command.length : close + 1;
+  }
+  return end;
+}
+
+export function scanCommandSpans(command: string): CommandSpan[] {
+  const spans: CommandSpan[] = [];
+  let i = 0;
+  while (i < command.length) {
+    if (/\s/.test(command[i])) {
+      i++;
+      continue;
+    }
+    const end = tokenEnd(command, i);
+    spans.push({ start: i, end, raw: command.slice(i, end) });
+    i = end;
+  }
+  return spans;
+}
+
+type Range = { start: number; end: number };
+
+/** Flags that ask omp for something other than a resume: never merge into those. */
+function forbidsOmpResume(raw: string): boolean {
+  return raw === '--restore' || raw.startsWith('--restore=') || raw === '--no-session';
+}
+
+/** Session flags with no value, or with the value inline: removed on their own. */
+function isSelfContainedSessionFlag(raw: string): boolean {
+  return raw === '--continue' || raw.startsWith('--continue=') || raw === '-c'
+    || raw.startsWith('--resume=') || raw.startsWith('--session=') || raw.startsWith('-r=');
+}
+
+/** Session flags whose value is the NEXT token, when that token is not a flag. */
+function isSeparateValueSessionFlag(raw: string): boolean {
+  return raw === '--resume' || raw === '-r' || raw === '--session';
+}
+
+/** Every session-selecting flag in an omp command line, with its value. */
+function ompSessionFlagRanges(spans: CommandSpan[]): Range[] {
+  const ranges: Range[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    if (isSelfContainedSessionFlag(span.raw)) {
+      ranges.push({ start: span.start, end: span.end });
+    } else if (isSeparateValueSessionFlag(span.raw)) {
+      const next = spans[i + 1];
+      const takesValue = next !== undefined && !next.raw.startsWith('-');
+      ranges.push({ start: span.start, end: takesValue ? next.end : span.end });
+      if (takesValue) i++;
+    }
+  }
+  return ranges;
+}
+
+/**
+ * Widen each removal over the separator beside it, so a deleted flag cannot
+ * leave a doubled space behind, and merge ranges that then touch. Only the
+ * whitespace ADJACENT to a removal is touched: whitespace inside a kept
+ * (quoted) argument stays byte-for-byte.
+ */
+function widenOverSeparator(command: string, range: Range): Range {
+  let { start, end } = range;
+  if (start > 0 && /\s/.test(command[start - 1])) {
+    while (start > 0 && /\s/.test(command[start - 1])) start--;
+  } else {
+    while (end < command.length && /\s/.test(command[end])) end++;
+  }
+  return { start, end };
+}
+
+function absorbSeparators(command: string, ranges: Range[]): Range[] {
+  const normalized: Range[] = [];
+  for (const range of ranges) {
+    const { start, end } = widenOverSeparator(command, range);
+    const last = normalized[normalized.length - 1];
+    if (last && start <= last.end) last.end = Math.max(last.end, end);
+    else normalized.push({ start, end });
+  }
+  return normalized;
+}
+
+/**
+ * An omp launcher with its own session flags replaced by `--resume <path>`, or
+ * null when it must not be resumed (`--restore`, `--no-session`, or a path the
+ * pane's shell cannot quote). Everything outside the removed flags keeps its
+ * exact original quoting and spacing.
+ */
+function mergeOmpResume(command: string, id: string, shell?: string): string | null {
+  const spans = scanCommandSpans(command);
+  if (spans.some(span => forbidsOmpResume(span.raw))) return null;
+  const quoted = quoteOmpArg(id, shell);
+  if (!quoted) return null;
+  let result = '';
+  let lastIdx = 0;
+  for (const range of absorbSeparators(command, ompSessionFlagRanges(spans))) {
+    result += command.slice(lastIdx, range.start);
+    lastIdx = range.end;
+  }
+  result += command.slice(lastIdx);
+  return `${result.trim()} --resume ${quoted}`;
+}
+
 /**
  * `base` with the resume added, or null when it must not be typed at all.
  *
@@ -141,12 +300,27 @@ export function lastAgentLauncher(commands: readonly string[]): { index: number;
  * names itself keeps its name and its flags — the resume rides on the same
  * command line, because a second line would be read by that agent's TUI.
  */
-export function mergeResume(base: readonly string[] | undefined, agent: ResumableAgent, id: string): string[] | null {
+export function mergeResume(
+  base: readonly string[] | undefined,
+  agent: ResumableAgent,
+  id: string,
+  shell?: string,
+): string[] | null {
   const commands = base ?? [];
   const launcher = lastAgentLauncher(commands);
-  if (!launcher) return [...commands, `${LAUNCH_COMMAND[agent]} ${id}`];
+  if (!launcher) {
+    const arg = agent === 'omp' ? quoteOmpArg(id, shell) : id;
+    if (!arg) return null;
+    return [...commands, `${LAUNCH_COMMAND[agent]} ${arg}`];
+  }
   if (launcher.agent !== agent) return null;
   const next = [...commands];
+  if (agent === 'omp') {
+    const cleaned = mergeOmpResume(next[launcher.index], id, shell);
+    if (!cleaned) return null;
+    next[launcher.index] = cleaned;
+    return next;
+  }
   next[launcher.index] = `${next[launcher.index]} ${RESUMABLE[agent].args(id)}`;
   return next;
 }

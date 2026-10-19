@@ -8,6 +8,17 @@ import { mergeResume, type ResumableAgent } from './agent-launcher';
 
 /** Mirrors CLAUDE_SESSION_ID_RE in src/main/claude-resume.ts. */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+/**
+ * Mirrors isValidOmpSessionId in src/main/omp-resume.ts: an absolute .jsonl
+ * path with no traversal segment, re-checked because session.json is editable.
+ */
+function isValidOmpHandle(id: unknown): id is string {
+  if (typeof id !== 'string' || id.length === 0 || id.length > 4096) return false;
+  if (/[\0\r\n]/.test(id)) return false;
+  if (!id.toLowerCase().endsWith('.jsonl')) return false;
+  if (/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(id)) return false;
+  return /^[a-zA-Z]:[\\/]/.test(id) || /^[\\/]{2}[^\\/]+[\\/]+[^\\/]+/.test(id) || id.startsWith('/');
+}
 
 /**
  * Surfaces that have already spent their stored resume in this run.
@@ -46,9 +57,10 @@ function applyResume(
   surfaceId: string,
   agent: ResumableAgent,
   id: string,
+  shell?: string,
 ): string[] | undefined {
   if (resumedSurfaces.has(surfaceId)) return base;
-  const next = mergeResume(base, agent, id);
+  const next = mergeResume(base, agent, id, shell);
   if (!next) return base;
   resumedSurfaces.add(surfaceId);
   return next;
@@ -86,13 +98,16 @@ export function withClaudeResume(opts: {
   agyEnabled?: boolean;
   qwenSessionId?: string;
   qwenEnabled?: boolean;
+  ompSessionId?: string;
+  ompEnabled?: boolean;
+  shell?: string;
 }): string[] | undefined {
   const { base, surfaceId, claudeSessionId, enabled } = opts;
   if (!surfaceId) return base;
   if (opts.qwenSessionId) return withQwenResume(base, surfaceId, opts);
   if (opts.agySessionId) {
     // One provider per tab, as for Codex and OpenCode.
-    if (claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || !opts.agyEnabled) return base;
+    if (claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.ompSessionId || !opts.agyEnabled) return base;
     // Mirrors AGY_CONVERSATION_ID_RE in src/main/agy-resume.ts — re-checked
     // because session.json is a file the user can edit.
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(opts.agySessionId)) return base;
@@ -101,7 +116,7 @@ export function withClaudeResume(opts: {
   if (opts.opencodeSessionId) {
     // Same rule as Codex: two providers' handles on one tab is a state nothing
     // wrote on purpose, and guessing would type an agent into another's TUI.
-    if (claudeSessionId || opts.codexSessionId || !opts.opencodeEnabled) return base;
+    if (claudeSessionId || opts.codexSessionId || opts.ompSessionId || !opts.opencodeEnabled) return base;
     // Mirrors OPENCODE_SESSION_ID_RE in src/main/opencode-resume.ts — re-checked
     // because session.json is a file the user can edit.
     if (!/^ses_[A-Za-z0-9]{8,120}$/.test(opts.opencodeSessionId)) return base;
@@ -109,8 +124,14 @@ export function withClaudeResume(opts: {
   }
   if (opts.codexSessionId) {
     // Mixed provider state is ambiguous: never type a second agent into a TUI.
-    if (claudeSessionId || !opts.codexEnabled || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(opts.codexSessionId)) return base;
+    if (claudeSessionId || opts.opencodeSessionId || opts.ompSessionId || !opts.codexEnabled || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(opts.codexSessionId)) return base;
     return applyResume(base, surfaceId, 'codex', opts.codexSessionId);
+  }
+  if (opts.ompSessionId) {
+    // Mixed provider state is ambiguous: never type a second agent into a TUI.
+    if (claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId || opts.qwenSessionId || !opts.ompEnabled) return base;
+    if (!isValidOmpHandle(opts.ompSessionId)) return base;
+    return applyResume(base, surfaceId, 'omp', opts.ompSessionId, opts.shell);
   }
   if (!enabled || !claudeSessionId) return base;
   // Re-validated here even though the main process validates on the way in:
@@ -128,11 +149,11 @@ export function withClaudeResume(opts: {
 function withQwenResume(
   base: string[] | undefined,
   surfaceId: string,
-  opts: { qwenSessionId?: string; qwenEnabled?: boolean; claudeSessionId?: string; codexSessionId?: string; opencodeSessionId?: string; agySessionId?: string },
+  opts: { qwenSessionId?: string; qwenEnabled?: boolean; claudeSessionId?: string; codexSessionId?: string; opencodeSessionId?: string; agySessionId?: string; ompSessionId?: string },
 ): string[] | undefined {
   const id = opts.qwenSessionId;
   if (!id || !opts.qwenEnabled) return base;
-  if (opts.claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId) return base;
+  if (opts.claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId || opts.ompSessionId) return base;
   // Mirrors QWEN_SESSION_ID_RE in src/main/qwen-resume.ts — re-checked because
   // session.json is a file the user can edit.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return base;

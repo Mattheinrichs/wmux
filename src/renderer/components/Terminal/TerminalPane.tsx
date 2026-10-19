@@ -28,6 +28,8 @@ interface TerminalPaneProps {
   agySessionId?: string;
   /** Qwen Code session to resume on a restored pane. */
   qwenSessionId?: string;
+  /** Omp session to resume on a restored pane. */
+  ompSessionId?: string;
   focused?: boolean;
   visible?: boolean;
   showFindBar?: boolean;
@@ -47,13 +49,14 @@ export default function TerminalPane({
   opencodeSessionId,
   agySessionId,
   qwenSessionId,
+  ompSessionId,
   focused = true,
   visible = true,
   showFindBar = false,
   onFindBarClose,
   copyModeActive = false,
 }: TerminalPaneProps) {
-  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId });
+  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId });
 
   const [_lastQuery, setLastQuery] = useState('');
 

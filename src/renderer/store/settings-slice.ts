@@ -537,6 +537,11 @@ export interface WorkspacePrefs {
   restoreAgySessions: boolean;
   restoreQwenSessions: boolean;
   /**
+   * Opt-in: reopen each tab's omp session with `omp --resume <path>`.
+   * Off by default — every such pane starts an agent at once.
+   */
+  restoreOmpSessions: boolean;
+  /**
    * How many terminal panes a new workspace opens with, and how they sit
    * (issue #212).
    *
@@ -591,6 +596,7 @@ export const DEFAULT_WORKSPACE_PREFS: WorkspacePrefs = {
   restoreOpencodeSessions: false,
   restoreAgySessions: false,
   restoreQwenSessions: false,
+  restoreOmpSessions: false,
   detectAgentScreens: true,
   newWorkspacePanes: 3,
   newWorkspaceLayout: 'grid',
