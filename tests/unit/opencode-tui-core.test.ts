@@ -113,6 +113,101 @@ describe('createSessionReporter (#310)', () => {
   });
 });
 
+describe('prompt capture (#310 phase 2)', () => {
+  // The event shape from OpenCode v2's schema:
+  // session.inbox.enqueued { sessionID, inboxID, item }
+  //   item = { type: "user" | "synthetic" | "compaction" | "move", payload, delivery }
+  const enqueued = (overrides: any = {}) => ({
+    sessionID: 'ses_abc12345',
+    inboxID: 'msg_inbox1',
+    item: { type: 'user', payload: { text: 'fix the flaky test' }, delivery: 'steer' },
+    ...overrides,
+  });
+
+  it('takes the text of a user item, with the ids dedupe and attribution need', async () => {
+    const { planPromptReport } = await load();
+    expect(planPromptReport(enqueued())).toEqual({
+      sessionID: 'ses_abc12345',
+      inboxID: 'msg_inbox1',
+      text: 'fix the flaky test',
+    });
+  });
+
+  it('ignores synthetic, compaction and move items — never something a human typed', async () => {
+    const { planPromptReport } = await load();
+    for (const type of ['synthetic', 'compaction', 'move']) {
+      expect(planPromptReport(enqueued({ item: { type, payload: { text: 'x' }, delivery: 'steer' } }))).toBeNull();
+    }
+  });
+
+  it('ignores an empty prompt, a missing payload, and anything that is not an inbox event', async () => {
+    const { planPromptReport } = await load();
+    expect(planPromptReport(enqueued({ item: { type: 'user', payload: { text: '   ' }, delivery: 'steer' } }))).toBeNull();
+    expect(planPromptReport(enqueued({ item: { type: 'user', payload: {}, delivery: 'steer' } }))).toBeNull();
+    expect(planPromptReport(enqueued({ item: { type: 'user', delivery: 'steer' } }))).toBeNull();
+    expect(planPromptReport(null)).toBeNull();
+    expect(planPromptReport({})).toBeNull();
+  });
+
+  it('requires a session id that passes the same validator as everywhere else', async () => {
+    const { planPromptReport } = await load();
+    expect(planPromptReport(enqueued({ sessionID: 'not-a-session' }))).toBeNull();
+  });
+
+  it('knows which sessions this TUI hosts: the viewed one and its tabs', async () => {
+    const { isHostedSession } = await load();
+    expect(isHostedSession('ses_abc12345', { current: 'ses_abc12345', tabs: [] })).toBe(true);
+    expect(isHostedSession('ses_def67890', { current: 'ses_abc12345', tabs: ['ses_def67890'] })).toBe(true);
+    expect(isHostedSession('ses_other999', { current: 'ses_abc12345', tabs: ['ses_def67890'] })).toBe(false);
+    expect(isHostedSession(undefined, { current: null, tabs: [] })).toBe(false);
+  });
+
+  it('extracts tab session ids defensively — the host shape is not ours to assume', async () => {
+    const { tabSessionIds } = await load();
+    expect(tabSessionIds([
+      { sessionID: 'ses_a1234567' },
+      { sessionId: 'ses_b1234567' },
+      { id: 'ses_c1234567' },
+      { nothing: true },
+      null,
+    ])).toEqual(['ses_a1234567', 'ses_b1234567', 'ses_c1234567']);
+    expect(tabSessionIds(undefined)).toEqual([]);
+  });
+
+  it('reports a hosted prompt through the #305 event path, no --surface needed', async () => {
+    const { createPromptReporter } = await load();
+    const sent: string[][] = [];
+    const reporter = createPromptReporter({ callWmux: (argv: string[]) => sent.push(argv) });
+    reporter.observe(enqueued(), true);
+    expect(sent).toEqual([['hook', '--event', 'UserPromptSubmit', '--prompt', 'fix the flaky test']]);
+  });
+
+  it('does not attribute a prompt from a session this TUI is not hosting', async () => {
+    const { createPromptReporter } = await load();
+    const sent: string[][] = [];
+    const reporter = createPromptReporter({ callWmux: (argv: string[]) => sent.push(argv) });
+    reporter.observe(enqueued(), false);
+    expect(sent).toEqual([]);
+  });
+
+  it('reports one prompt per inbox id, however many replays arrive', async () => {
+    const { createPromptReporter } = await load();
+    const sent: string[][] = [];
+    const reporter = createPromptReporter({ callWmux: (argv: string[]) => sent.push(argv) });
+    reporter.observe(enqueued(), true);
+    reporter.observe(enqueued(), true);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('caps a pasted prompt at the same 4000 chars the other producers use', async () => {
+    const { createPromptReporter } = await load();
+    const sent: string[][] = [];
+    const reporter = createPromptReporter({ callWmux: (argv: string[]) => sent.push(argv) });
+    reporter.observe(enqueued({ item: { type: 'user', payload: { text: 'x'.repeat(5000) }, delivery: 'steer' } }), true);
+    expect(sent[0][4].length).toBe(4000);
+  });
+});
+
 describe('callWmux (#310)', () => {
   const runtimeNode = { file: ':node:', electron: false };
 
