@@ -29,6 +29,7 @@ const child_process_1 = require("child_process");
 const stream_1 = require("stream");
 const wsl_network_1 = require("./wsl-network");
 const transport_deadline_1 = require("./transport-deadline");
+const opencode_tui_install_1 = require("./opencode-tui-install");
 /** The two signals wsl-network.ts uses to decide we are inside a WSL distro. */
 function readWslEnvironment() {
     let osRelease = null;
@@ -1381,6 +1382,44 @@ function hookParams(args) {
 async function cmdHook(args) {
     await sendV2('hook.event', hookParams(args));
 }
+/**
+ * `wmux opencode-tui [--remove]` — install the CLI-side (TUI) half (#310).
+ *
+ * Deliberately a local file operation, not a pipe command: it is run from the
+ * pane that will host the TUI, so the config directory it resolves is the
+ * distro/container/native home the TUI will actually read. See
+ * opencode-tui-install.ts for why Windows never writes WSL homes directly.
+ */
+function cmdOpencodeTui(args) {
+    const configDir = (0, opencode_tui_install_1.opencodeConfigDir)(process.env, os_1.default.homedir());
+    if (args.includes('--remove')) {
+        const result = (0, opencode_tui_install_1.removeOpencodeTui)({ configDir });
+        if (result.status === 'removed') {
+            console.log(`Removed the wmux OpenCode TUI plugin from ${result.dir}`);
+        }
+        else if (result.status === 'absent') {
+            console.log(`No wmux OpenCode TUI plugin installed at ${result.dir}`);
+        }
+        else {
+            console.error(`Refusing to remove ${path_1.default.join(result.dir, 'tui.js')}: it carries no wmux version marker.`);
+            process.exit(1);
+        }
+        return;
+    }
+    const sourceDir = (0, opencode_tui_install_1.opencodePluginSourceDir)(__dirname);
+    if (!sourceDir) {
+        console.error('wmux: the shipped OpenCode TUI plugin files are missing next to the CLI.');
+        process.exit(1);
+    }
+    const result = (0, opencode_tui_install_1.installOpencodeTui)({ sourceDir, configDir });
+    if (result.status === 'installed') {
+        console.log(`Installed the wmux OpenCode TUI plugin (v${result.version ?? '?'}) to ${result.dir}`);
+        console.log('Restart OpenCode so the TUI loads it.');
+    }
+    else {
+        console.log(`wmux OpenCode TUI plugin already current (v${result.version ?? '?'}) at ${result.dir}`);
+    }
+}
 async function cmdAgentActivity(args) {
     const surfaceId = getFlag(args, '--surface') || process.env.WMUX_SURFACE_ID;
     if (!surfaceId) {
@@ -2094,6 +2133,10 @@ const COMMAND_SPECS = {
         usage: 'wmux hook --event <type> --tool <name> [--agent <id>] [--prompt <text>]',
         value: ['--event', '--tool', '--agent', '--prompt'],
     },
+    'opencode-tui': {
+        usage: 'wmux opencode-tui [--remove]   (the CLI-side OpenCode v2 half, installed in THIS environment)',
+        bool: ['--remove'],
+    },
     'agent-activity': {
         usage: `wmux agent-activity [--tool T] [--skill S] [--done|--active] [--surface <id>]   ${SURFACE_NOTE}`,
         value: ['--tool', '--skill', '--surface'],
@@ -2342,6 +2385,7 @@ const COMMANDS = {
         print(await sendV2('diff.refresh', { file }));
     },
     hook: cmdHook,
+    'opencode-tui': cmdOpencodeTui,
     'agent-activity': cmdAgentActivity,
     // Devcontainer support (issue #19)
     'raw-v1': cmdRawV1,
@@ -2424,6 +2468,7 @@ Diff:       diff [--file <path>]
 Notify:     notify <text>, list-notifications, clear-notifications
 Sidebar:    set-status, set-progress, log, sidebar-state
 Hook:       hook --event <type> --tool <name> [--agent <id>] [--prompt <text>]
+OpenCode:   opencode-tui [--remove]   # the CLI-side half, for remote/shared OpenCode v2 servers
 Crash:      crash-report [--events N] [--log-lines N]
             (Event Log fingerprint + wmux's own log. No memory, so no secrets —
              paste this instead of a crash dump. See docs/crash-reports.md.)
