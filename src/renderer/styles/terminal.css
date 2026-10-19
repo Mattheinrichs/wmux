@@ -26,6 +26,31 @@
   touch-action: none;
 }
 
+/* IME composition (issue #301). xterm paints the in-progress composition as a
+   flat #000/#FFF block; utils/ime-composition.ts redraws it in the theme's
+   colours (inline, read off the live theme) with the IME's caret or selected
+   clause visible. Underlined like conhost and native text fields, so it still
+   reads as "not typed yet". */
+.terminal-pane__container .xterm .composition-view .wmux-ime__text {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.terminal-pane__container .xterm .composition-view .wmux-ime__text--active {
+  background: var(--wmux-ime-selection);
+  text-decoration-thickness: 2px;
+}
+/* Zero width, so the caret never changes the view's width — xterm sizes the
+   hidden textarea off it, and the IME's candidate window is positioned from
+   that textarea. */
+.terminal-pane__container .xterm .composition-view .wmux-ime__caret {
+  display: inline-block;
+  width: 0;
+  height: 1.1em;
+  vertical-align: text-bottom;
+  border-left: 2px solid var(--wmux-ime-cursor);
+  margin-right: -2px;
+}
+
 .terminal-pane__container .xterm {
   height: 100%;
   padding: 2px;

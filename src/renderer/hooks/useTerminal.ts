@@ -37,6 +37,7 @@ import { trimTrailingWhitespace } from '../utils/copy-text';
 import { handleShiftEnter, isLetterKey, isShiftEnter } from './terminal-keys';
 import { applyKeyRemap } from '../key-remaps';
 import { claimsKeyEvent } from '../utils/shortcut-binding';
+import { installXtermCompositionClauses } from '../utils/ime-composition';
 import { isConEmuSubcommand } from './osc9';
 import { forgetSurface as forgetPromptLog, handlePromptMark, refreshHighlights } from '../utils/prompt-log';
 import {
@@ -1314,6 +1315,10 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
         this._compositionPosition = { start: 0, end: 0 };
         this._dataAlreadySent = '';
       };
+
+      // Show where the IME is inside the composition — its caret or selected
+      // clause — instead of xterm's flat black block (#301).
+      cleanupFnsRef.current.push(installXtermCompositionClauses(terminal, compositionHelper, xtermCore.textarea));
     }
 
     // Register OSC notification handlers
