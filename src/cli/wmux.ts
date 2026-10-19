@@ -1331,14 +1331,33 @@ async function cmdNotify(args: string[]): Promise<void> {
   console.log('Notification sent');
 }
 
-async function cmdHook(args: string[]): Promise<void> {
+/**
+ * The `hook.event` params from argv — pairs of flag and value, consumed
+ * unconditionally.
+ *
+ * Deliberately NOT `parseFlagArgs` (#304): that parser refuses a value when it
+ * reads as one of its own flags ("--prompt --tool" = a missing value), and a
+ * prompt whose entire text is `--tool` is a prompt, not malformed argv. The
+ * unconditional next-slot read is also the only quoting-honest option: every
+ * caller passes argv pre-split, so spaces, quotes and newlines arrive intact.
+ *
+ * The `--prompt` value is the user's own words on their way to the prompt log;
+ * it is the one free-text body besides a Notification's message that crosses
+ * this boundary, and main fans it to the windows verbatim.
+ */
+export function hookParams(args: string[]): Record<string, string> {
   const params: Record<string, string> = {};
   for (let i = 1; i < args.length; i += 2) {
     if (args[i] === '--event') params.event = args[i + 1];
     if (args[i] === '--tool') params.tool = args[i + 1];
     if (args[i] === '--agent') params.agentId = args[i + 1];
+    if (args[i] === '--prompt') params.prompt = args[i + 1];
   }
-  await sendV2('hook.event', params);
+  return params;
+}
+
+async function cmdHook(args: string[]): Promise<void> {
+  await sendV2('hook.event', hookParams(args));
 }
 
 async function cmdAgentActivity(args: string[]): Promise<void> {
@@ -2129,8 +2148,8 @@ const COMMAND_SPECS = {
 
   diff: { usage: 'wmux diff [--file <path>]', value: ['--file'] },
   hook: {
-    usage: 'wmux hook --event <type> --tool <name> [--agent <id>]',
-    value: ['--event', '--tool', '--agent'],
+    usage: 'wmux hook --event <type> --tool <name> [--agent <id>] [--prompt <text>]',
+    value: ['--event', '--tool', '--agent', '--prompt'],
   },
   'agent-activity': {
     usage: `wmux agent-activity [--tool T] [--skill S] [--done|--active] [--surface <id>]   ${SURFACE_NOTE}`,
@@ -2476,7 +2495,7 @@ Markdown:   markdown <file>   (open a file in a new markdown view)
 Diff:       diff [--file <path>]
 Notify:     notify <text>, list-notifications, clear-notifications
 Sidebar:    set-status, set-progress, log, sidebar-state
-Hook:       hook --event <type> --tool <name> [--agent <id>]
+Hook:       hook --event <type> --tool <name> [--agent <id>] [--prompt <text>]
 Crash:      crash-report [--events N] [--log-lines N]
             (Event Log fingerprint + wmux's own log. No memory, so no secrets —
              paste this instead of a crash dump. See docs/crash-reports.md.)

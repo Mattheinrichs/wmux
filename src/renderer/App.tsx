@@ -51,7 +51,7 @@ import type {
 } from './components/SplitPane/drag-preview-types';
 import { buildSurfaceDragPreview } from './components/SplitPane/surface-drag-preview';
 import { forgetSurfaceTitle, surfaceTerminalRegistry } from './hooks/useTerminal';
-import { forgetSurface as forgetPromptLog, recordAgentPrompt } from './utils/prompt-log';
+import { forgetSurface as forgetPromptLog, hookEventSurface, recordAgentPrompt } from './utils/prompt-log';
 import { SURFACE_CLOSED_EVENT } from './store/pty-teardown';
 import { installRemoteRendererHandler } from './utils/remote-snapshot';
 import { formatRemoteNotice } from './utils/remote-notice';
@@ -414,7 +414,10 @@ function handleSurfaceMetadata(cmd: any, ws: WorkspaceInfo, deps: MetaDeps): voi
 }
 
 /**
- * Claude Code UserPromptSubmit → the pane's prompt log (issue #207).
+ * Claude Code UserPromptSubmit → the pane's prompt log (issue #207); since
+ * #304 the same event arrives from OpenCode v2's prompt-admission hook via
+ * `wmux hook --prompt`, which spells the pane `caller` rather than `surfaceId`
+ * — `hookEventSurface` resolves both.
  *
  * Needs the surface's live terminal, because a prompt boundary is only useful
  * as a POSITION in a buffer: the marker has to be registered against the
@@ -427,7 +430,7 @@ function handleSurfaceMetadata(cmd: any, ws: WorkspaceInfo, deps: MetaDeps): voi
  * it, and a prompt lost to a remount is one line in an outline.
  */
 function recordPromptSubmission(event: any): void {
-  const surfaceId = typeof event.surfaceId === 'string' ? event.surfaceId : '';
+  const surfaceId = hookEventSurface(event);
   const prompt = typeof event.prompt === 'string' ? event.prompt : '';
   if (!surfaceId || !prompt) return;
   // Claude Code feeds a finished background task back as the next turn's input

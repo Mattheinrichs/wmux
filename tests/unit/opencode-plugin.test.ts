@@ -71,7 +71,8 @@ describe('the plugin file itself', () => {
   it('carries a version marker, or wmux cannot know to reinstall it', () => {
     // pluginNeedsUpdate() compares this; an install stuck on v4 keeps #191.
     // v5 → v6 is #271: every v5 install is the file OpenCode v2 rejects.
-    expect(src).toMatch(/wmux-plugin-version:\s*7/);
+    // v7 → v8 is #304: without the bump no installed copy gains the prompt hook.
+    expect(src).toMatch(/wmux-plugin-version:\s*8/);
   });
 
   it('exports WmuxPlugin and the default definition, NOTHING else (#191, #271)', async () => {
@@ -358,7 +359,7 @@ describe('debug logging (#190)', () => {
 });
 
 /**
- * A stand-in for OpenCode v2's promise `Context`, holding exactly the three
+ * A stand-in for OpenCode v2's promise `Context`, holding exactly the four
  * domains the plugin touches. `push` feeds the event stream the way
  * `ctx.event.subscribe` would.
  */
@@ -385,6 +386,7 @@ function fakeV2Context() {
   const ctx = {
     tool: { hook: hook('tool') },
     shell: { hook: hook('shell') },
+    session: { hook: hook('session') },
     event: {
       subscribe(options?: { signal?: AbortSignal }) {
         signal = options?.signal;
@@ -441,6 +443,48 @@ describe('OpenCode v2 (#271)', () => {
     await hooks['shell.create.before'](input);
     expect(input.env.WMUX).toBe('1');
     expect(input.env.WMUX_SURFACE_ID).toBe(SURFACE);
+    await cleanup();
+  });
+
+  /**
+   * Issue #304 — the prompt log. Its only agent-side producer is a
+   * `UserPromptSubmit` hook event, and until now nothing on the OpenCode side
+   * ever sent one: the outline/Prompts pane/`wmux prompts` were empty for every
+   * OpenCode pane, on every version.
+   */
+  it('forwards a submitted prompt to the prompt log (#304)', async () => {
+    const { hooks, cleanup } = await v2PluginWith();
+    await hooks['session.prompt']({ prompt: { text: 'fix the flaky test' }, sessionID: 's', messageID: 'msg_1' });
+    expect(verbs()).toEqual([['hook', '--event', 'UserPromptSubmit', '--prompt', 'fix the flaky test']]);
+    await cleanup();
+  });
+
+  it('reports one prompt per message, however many times admission reruns (#304)', async () => {
+    // v2 documents prompt admission as retry-safe but NOT exactly-once; a
+    // second entry for one prompt would put two jump marks on one line.
+    const { hooks, cleanup } = await v2PluginWith();
+    const event = { prompt: { text: 'again' }, sessionID: 's', messageID: 'msg_2' };
+    await hooks['session.prompt'](event);
+    await hooks['session.prompt'](event);
+    expect(verbs()).toEqual([['hook', '--event', 'UserPromptSubmit', '--prompt', 'again']]);
+    await cleanup();
+  });
+
+  it('drops an empty prompt — attachments alone are not a prompt (#304)', async () => {
+    const { hooks, cleanup } = await v2PluginWith();
+    await hooks['session.prompt']({ prompt: { text: '   ' }, sessionID: 's', messageID: 'msg_3' });
+    await hooks['session.prompt']({ prompt: {}, sessionID: 's', messageID: 'msg_4' });
+    await hooks['session.prompt']({ sessionID: 's', messageID: 'msg_5' });
+    expect(calls).toEqual([]);
+    await cleanup();
+  });
+
+  it('caps a pasted prompt at the 4000 chars wmux-hook.js uses (#304)', async () => {
+    const { hooks, cleanup } = await v2PluginWith();
+    await hooks['session.prompt']({ prompt: { text: 'x'.repeat(5000) }, sessionID: 's', messageID: 'msg_6' });
+    const verb = verbs()[0];
+    expect(verb.slice(0, 4)).toEqual(['hook', '--event', 'UserPromptSubmit', '--prompt']);
+    expect(verb[4].length).toBe(4000);
     await cleanup();
   });
 
@@ -525,7 +569,7 @@ describe('OpenCode v2 (#271)', () => {
   it('cleanup stops the event loop and disposes every hook', async () => {
     const { push, disposed, cleanup } = await v2PluginWith();
     await cleanup();
-    expect(disposed.sort()).toEqual(['shell.create.before', 'tool.execute.after', 'tool.execute.before']);
+    expect(disposed.sort()).toEqual(['session.prompt', 'shell.create.before', 'tool.execute.after', 'tool.execute.before']);
     calls.length = 0;
     await push({ type: 'session.idle', data: {} });
     expect(calls).toEqual([]);
