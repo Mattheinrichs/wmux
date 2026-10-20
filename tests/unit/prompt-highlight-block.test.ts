@@ -24,9 +24,9 @@ interface FakeDecoration {
   dispose(): void;
 }
 
-function fakeTerminal(rows: string[]) {
+function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
   const decorations: FakeDecoration[] = [];
-  const state = { baseY: 0, cursorY: rows.length - 1 };
+  const state = { baseY: 0, cursorY: cursorLine };
   const term = {
     rows: 24,
     cols: 80,
@@ -165,7 +165,7 @@ describe('a live prompt can be refined to its echo above', () => {
 });
 
 describe('the decoration is bounded to that block', () => {  it('paints from the prompt text, not from column zero', () => {
-    const rows = [` session one │  ${PROMPT}`];
+    const rows = [` session one │  ${PROMPT}`, ''];
     const { term, decorations } = fakeTerminal(rows);
     openMarkAt(term, SURFACE, 'e1', 0);
     applyHighlight(term, SURFACE, 'e1', {
@@ -189,6 +189,7 @@ describe('the decoration is bounded to that block', () => {  it('paints from the
     const rows = [
       '│  first line of the prompt',
       '│  second line of the prompt',
+      '',
     ];
     const { term, decorations } = fakeTerminal(rows);
     openMarkAt(term, SURFACE, 'e1', 0);
@@ -215,15 +216,35 @@ describe('the decoration is bounded to that block', () => {  it('paints from the
       needle: buildNeedle(PROMPT),
       confirmed: false,
       text: PROMPT,
-      liveAfter: 0,
     });
 
     expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
     expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
   });
 
-  it('tints once the block is above the live input row', () => {
-    const rows = [`> ${PROMPT}`];
+  it('withholds a multi-line block whose last row is the cursor', () => {
+    const rows = [
+      '> first line of the prompt',
+      '> second line of the prompt',
+      '',
+    ];
+    const { term, decorations } = fakeTerminal(rows, 1);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 2,
+      ruler: true,
+      needle: buildNeedle('first line of the prompt'),
+      confirmed: false,
+      text: 'first line of the prompt\nsecond line of the prompt',
+    });
+
+    expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
+    expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
+  });
+
+  it('tints once the block is entirely above the cursor', () => {
+    const rows = [`> ${PROMPT}`, ''];
     const { term, decorations } = fakeTerminal(rows);
     openMarkAt(term, SURFACE, 'e1', 0);
     applyHighlight(term, SURFACE, 'e1', {
@@ -233,7 +254,6 @@ describe('the decoration is bounded to that block', () => {  it('paints from the
       needle: buildNeedle(PROMPT),
       confirmed: false,
       text: PROMPT,
-      liveAfter: 1,
     });
 
     expect(latest(decorations)?.options.backgroundColor).toBeTruthy();
@@ -256,7 +276,7 @@ describe('the decoration is bounded to that block', () => {  it('paints from the
   });
 
   it('still withholds a short agent prompt even when the block matches', () => {
-    const { term, decorations } = fakeTerminal(['│  yes']);
+    const { term, decorations } = fakeTerminal(['│  yes', '']);
     openMarkAt(term, SURFACE, 'e1', 0);
     applyHighlight(term, SURFACE, 'e1', {
       color: '#6ea8ff',

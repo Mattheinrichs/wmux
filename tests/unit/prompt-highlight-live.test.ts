@@ -15,9 +15,9 @@ interface FakeDecoration {
   dispose(): void;
 }
 
-function fakeTerminal(rows: string[]) {
+function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
   const decorations: FakeDecoration[] = [];
-  const state = { baseY: 0, cursorY: rows.length - 1 };
+  const state = { baseY: 0, cursorY: cursorLine };
   const term = {
     rows: 24,
     cols: 80,
@@ -51,7 +51,7 @@ function fakeTerminal(rows: string[]) {
     },
     scrollToLine() {},
   };
-  return { term: term as unknown as Terminal, decorations, rows };
+  return { term: term as unknown as Terminal, decorations, rows, state };
 }
 
 const SURFACE = 'surf-live';
@@ -110,6 +110,32 @@ describe('an agent prompt submitted from the live composer', () => {
     expect(echo.options.height).toBe(2);
     expect(echo.options.x).toBe(rows[0].indexOf('fix') - 1);
     expect(echo.options.width).toBeLessThan(80);
+    expect(useStore.getState().prompts[SURFACE]?.[0]?.line).toBe(0);
+  });
+
+  it('holds a multi-line composer whose first row is above the cursor', () => {
+    const rows = [
+      ' session one    │  ready',
+      '> fix the flaky pty-manager test',
+      '> and the tunnel config',
+    ];
+    const { term, decorations, state } = fakeTerminal(rows, 2);
+    recordAgentPrompt(term, SURFACE, 'fix the flaky pty-manager test\nand the tunnel config', 1_000);
+
+    // The cursor is on the composer's LAST row. The block starts above it, but
+    // it still reaches the cursor, so it is the live input area, not the echo.
+    expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
+    expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
+
+    rows[0] = ' session one    │  fix the flaky pty-manager test';
+    rows[1] = ' session two    │  and the tunnel config';
+    rows[2] = ' working…';
+    state.cursorY = 2;
+    vi.advanceTimersByTime(200);
+
+    const echo = latest(decorations)!;
+    expect(echo.options.backgroundColor).toBeTruthy();
+    expect(echo.options.height).toBe(2);
     expect(useStore.getState().prompts[SURFACE]?.[0]?.line).toBe(0);
   });
 });

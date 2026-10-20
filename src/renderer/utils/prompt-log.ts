@@ -50,18 +50,13 @@ function promptPrefs() {
 }
 
 /**
- * Absolute line of the agent's live input region when the prompt was submitted.
+ * Pending refine retries, keyed by entry id.
  *
- * The mark starts there because that is where the cursor was when the hook
- * arrived. OpenCode (and every TUI with a composer) has already echoed the text
- * ABOVE that line, or will paint it there a moment later; a band on the live
- * line is a band over the input box and, in OpenCode, over the session sidebar
- * beside it. The origin stays here rather than on the entry because it is a fact
- * about the submission, not about the prompt.
+ * A retry is about resolving the LINE, not about the tint: an anchor-only setup
+ * needs the echo located just as much as a highlighted one, and the line can
+ * settle while the highlight stays off. The budget is bounded so a TUI that
+ * never paints a recognisable echo leaves the ruler tick rather than a timer.
  */
-const agentOrigins = new Map<string, number>();
-
-/** Pending refine retries, keyed by entry id. */
 const tintRetries = new Map<string, ReturnType<typeof setInterval>>();
 const TINT_RETRY_MS = 150;
 const TINT_RETRY_BUDGET_MS = 5_000;
@@ -137,25 +132,26 @@ function highlightOptionsFor(entry: PromptEntry) {
     needle: marks.buildNeedle(entry.text),
     confirmed: entry.source !== 'agent',
     text: entry.source === 'agent' ? entry.text : undefined,
-    liveAfter: agentOrigins.get(entry.id),
   };
 }
 
 /** Highlight + anchor an entry according to the current preferences. */
 function applyViews(terminal: Terminal, entry: PromptEntry): boolean {
   const prefs = promptPrefs();
-  let tinted = false;
+  let settled = entry.source !== 'agent';
   if (prefs.highlight) {
-    tinted = marks.applyHighlight(terminal, entry.surfaceId, entry.id, highlightOptionsFor(entry));
+    settled = marks.applyHighlight(terminal, entry.surfaceId, entry.id, highlightOptionsFor(entry)).settled;
+  } else if (entry.source === 'agent' && entry.text) {
+    settled = marks.promptAboveLive(terminal, entry.surfaceId, entry.id, entry.text);
   }
   // Anchoring is deliberately last and deliberately conditional on a resolved
   // line: an anchor is the one view that changes what the terminal DOES rather
   // than how it looks, so it must never engage on a guess.
   //
-  // An AGENT line is only resolved once it is above the live input region. The
-  // composer holds the prompt text too, so a marker left there would satisfy the
-  // text check and anchor the view to the composer while the answer streams past
-  // underneath — the same mistake the tint now refuses to make.
+  // An AGENT line is only settled once the echo is entirely above the live input
+  // region. The composer holds the prompt text too, so a marker there would
+  // satisfy the text check and anchor the view to the composer while the answer
+  // streams past underneath — the same mistake the tint now refuses to make.
   //
   // The anchor is given a RESOLVER, not the line — `entry.line` is a snapshot
   // and the row moves once the scrollback starts trimming. The marker is the
@@ -164,14 +160,11 @@ function applyViews(terminal: Terminal, entry: PromptEntry): boolean {
   // `anchorScope` keeps the default narrow: a shell that follows its own output
   // is not the problem issue #207 describes, and holding `npm run build` back
   // from streaming would read as a freeze rather than as a feature.
-  const origin = agentOrigins.get(entry.id);
-  const settled = entry.source !== 'agent'
-    || (origin !== undefined && entry.line !== null && entry.line < origin);
   const inScope = prefs.anchorScope === 'all' || entry.source === 'agent';
   if (prefs.anchor && inScope && settled && entry.line !== null) {
     anchor.anchorAt(terminal, entry.surfaceId, marks.lineResolver(entry.surfaceId, entry.id));
   }
-  return tinted;
+  return settled;
 }
 
 /** Cancel one entry's pending retry, if any. */
@@ -197,7 +190,6 @@ function scheduleTintRetry(
   surfaceId: string,
   entryId: string,
   text: string,
-  origin: number,
 ): void {
   cancelTintRetry(entryId);
   const started = Date.now();
@@ -206,15 +198,24 @@ function scheduleTintRetry(
       cancelTintRetry(entryId);
       return;
     }
-    const moved = marks.refineMarkAbove(terminal, surfaceId, entryId, text, origin);
+    const moved = marks.refineMarkAbove(
+      terminal,
+      surfaceId,
+      entryId,
+      text,
+      marks.liveLine(terminal),
+    );
     if (moved === null) return;
     const store = useStore.getState();
-    store.updatePrompt(surfaceId, entryId, { line: moved });
-    const entry = useStore.getState().prompts[surfaceId]?.find((candidate) => candidate.id === entryId);
+    const entry = store.prompts[surfaceId]?.find((candidate) => candidate.id === entryId);
     if (!entry) {
       cancelTintRetry(entryId);
       return;
     }
+    // `updatePrompt` always replaces the array; skip it when the marker is
+    // already on the row so a retry that is waiting on the anchor does not
+    // re-render every prompt consumer four times a second.
+    if (entry.line !== moved) store.updatePrompt(surfaceId, entryId, { line: moved });
     if (applyViews(terminal, { ...entry, line: moved })) cancelTintRetry(entryId);
   }, TINT_RETRY_MS);
   tintRetries.set(entryId, timer);
@@ -264,8 +265,6 @@ export function recordAgentPrompt(
 
   const entry = commit(terminal, surfaceId, 'agent', clean, estimateRows(terminal, clean), at, null);
   if (!entry) return;
-  const origin = entry.line;
-  if (origin !== null) agentOrigins.set(entry.id, origin);
 
   // Move the mark onto the row where the TUI actually echoed the prompt. Only
   // possible for this source, because only this source knows the text. Done
@@ -277,13 +276,16 @@ export function recordAgentPrompt(
       useStore.getState().updatePrompt(surfaceId, entry.id, { line: refined });
     }
   }
-  const tinted = applyViews(terminal, entry);
+  const settled = applyViews(terminal, entry);
 
   // The composer still holds the prompt when the hook lands, so the refine
-  // above can legitimately resolve to the live row. Wait — on a timer, not on
-  // a repaint — for the TUI to echo it above; the block then gets the band.
-  if (!tinted && origin !== null && promptPrefs().highlight && marks.buildNeedle(clean)) {
-    scheduleTintRetry(terminal, surfaceId, entry.id, clean, origin);
+  // above can legitimately resolve to a row that is still the live input. Wait
+  // — on a timer, not on a repaint — for the TUI to paint the echo entirely
+  // above the cursor. Retry for the anchor too: a line that never settles is a
+  // wrong anchor even when the tint is switched off.
+  const prefs = promptPrefs();
+  if (!settled && (prefs.highlight || prefs.anchor) && marks.buildNeedle(clean)) {
+    scheduleTintRetry(terminal, surfaceId, entry.id, clean);
   }
 }
 
@@ -436,9 +438,6 @@ export function refreshHighlights(terminal: Terminal, surfaceId: string): void {
 export function forgetSurface(surfaceId: string): void {
   shellState.delete(surfaceId);
   lastAgentPrompt.delete(surfaceId);
-  for (const key of Array.from(agentOrigins.keys())) {
-    if (key.startsWith(`${surfaceId}:`)) agentOrigins.delete(key);
-  }
   for (const key of Array.from(tintRetries.keys())) {
     if (key.startsWith(`${surfaceId}:`)) cancelTintRetry(key);
   }
@@ -450,6 +449,5 @@ export function forgetSurface(surfaceId: string): void {
 export function __resetPromptLog(): void {
   shellState.clear();
   lastAgentPrompt.clear();
-  agentOrigins.clear();
   for (const key of Array.from(tintRetries.keys())) cancelTintRetry(key);
 }

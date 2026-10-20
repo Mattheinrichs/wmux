@@ -75,6 +75,18 @@ function cursorLine(terminal: Terminal): number {
   return buf.baseY + buf.cursorY;
 }
 
+/**
+ * The line the cursor is on RIGHT NOW.
+ *
+ * An agent's composer ends at the cursor. That is what decides whether a block
+ * is the live input region, and unlike the submit-time line it stays true while
+ * a multi-line prompt grows upward: the cursor remains on the last composer row,
+ * not on the first one.
+ */
+export function liveLine(terminal: Terminal): number {
+  return cursorLine(terminal);
+}
+
 /** Text of one absolute buffer line, trimmed of trailing blanks. */
 export function lineText(terminal: Terminal, absoluteLine: number): string {
   try {
@@ -255,19 +267,19 @@ export function refineMarkAbove(
   const record = marks.get(surfaceId)?.get(entryId);
   if (!record || record.marker.line < 0) return null;
 
-  const needle = buildNeedle(text);
-  if (!needle) return null;
+  if (!buildNeedle(text)) return null;
 
   const buf = terminal.buffer.active;
   const lowest = Math.max(0, before - REFINE_BACK_ROWS);
   const highest = Math.min(before - 1, buf.baseY + terminal.rows - 1);
   for (let line = highest; line >= lowest; line--) {
     // The block matcher is what makes a WRAPPED first line findable: a row can
-    // carry only part of it, and the single-row needle cannot see that.
+    // carry only part of it, and the single-row needle cannot see that. The
+    // block must end ABOVE the live line; a block that reaches it is the
+    // composer, whose first rows are above the cursor but are still input.
     const block = locatePromptBlock(terminal, line, text);
-    if (block) return moveMark(terminal, surfaceId, entryId, record, block.line);
-    if (needleRow(terminal, line, 1, needle) !== null) {
-      return moveMark(terminal, surfaceId, entryId, record, line);
+    if (block && block.line + block.rows - 1 < before) {
+      return moveMark(terminal, surfaceId, entryId, record, block.line);
     }
   }
   return null;
@@ -311,6 +323,24 @@ export function lineOf(surfaceId: string, entryId: string): number | null {
   const marker = marks.get(surfaceId)?.get(entryId)?.marker;
   if (!marker) return null;
   return marker.line >= 0 ? marker.line : null;
+}
+
+/**
+ * Whether this prompt's echoed block is entirely above the live input region.
+ *
+ * Used when the highlight is off but the anchor is on: the anchor still needs a
+ * line, and the composer is not it.
+ */
+export function promptAboveLive(
+  terminal: Terminal,
+  surfaceId: string,
+  entryId: string,
+  text: string,
+): boolean {
+  const record = marks.get(surfaceId)?.get(entryId);
+  if (!record || record.marker.line < 0) return false;
+  const block = locatePromptBlock(terminal, record.marker.line, text);
+  return block !== null && block.line + block.rows - 1 < cursorLine(terminal);
 }
 
 export interface PromptBlock {
@@ -443,12 +473,17 @@ export interface HighlightOptions {
    * covers the text's own columns and rows instead of the whole terminal row.
    */
   text?: string;
+}
+
+export interface HighlightResult {
+  /** A band was actually registered on the prompt's text. */
+  tinted: boolean;
   /**
-   * Absolute line of the agent's live input region at submission. A block at or
-   * below this line is still the composer (or the TUI's repaint zone), so only
-   * the ruler tick is drawn until the echo has scrolled above it.
+   * The block is resolved and entirely above the live input region. Only then
+   * may the caller anchor the view: the composer holds the prompt text too, and
+   * anchoring to it would hold the composer while the answer streams below.
    */
-  liveAfter?: number;
+  settled: boolean;
 }
 
 /** Most rows one prompt highlight may cover. */
@@ -587,15 +622,19 @@ export function applyHighlight(
   surfaceId: string,
   entryId: string,
   options: HighlightOptions,
-): boolean {
+): HighlightResult {
   const record = marks.get(surfaceId)?.get(entryId);
-  if (!record || record.marker.line < 0) return false;
+  if (!record || record.marker.line < 0) return { tinted: false, settled: false };
   clearHighlight(surfaceId, entryId);
 
   const block = options.text ? locatePromptBlock(terminal, record.marker.line, options.text) : null;
-  const deferred = block !== null
-    && options.liveAfter !== undefined
-    && block.line >= options.liveAfter;
+  // The composer grows UPWARD from the cursor, so "above the cursor" is not a
+  // live test on its own: the first row of a multi-line prompt is above it. A
+  // block is live when it CONTAINS or reaches the cursor, which is true for the
+  // whole composer and false for the echo above it.
+  const live = cursorLine(terminal);
+  const deferred = block !== null && block.line + block.rows - 1 >= live;
+  const settled = options.text ? block !== null && !deferred : true;
   const height = Math.max(1, Math.min(MAX_HIGHLIGHT_ROWS, block?.rows ?? (Math.floor(options.rows) || 1)));
   const needle = options.needle ?? null;
   // An uncheckable prompt falls back to what the SOURCE can promise: a shell's
@@ -608,11 +647,11 @@ export function applyHighlight(
     ? needleRow(terminal, record.marker.line, height, needle)
     : null;
   const onTheRow = options.text
-    ? block !== null && !deferred && (needle !== null || options.confirmed !== false)
+    ? settled && (needle !== null || options.confirmed !== false)
     : (needle ? found !== null : options.confirmed !== false);
   const tint = onTheRow ? blendOverBackground(options.color, backgroundOf(terminal)) : null;
   // Nothing left to draw: no band, and no tick asked for.
-  if (!onTheRow && !options.ruler) return false;
+  if (!onTheRow && !options.ruler) return { tinted: false, settled };
 
   // The rail lives in CSS, inset 4px from the decoration's left edge, so the
   // decoration starts one cell before the text. That keeps the rail in the
@@ -634,7 +673,7 @@ export function applyHighlight(
         ? { overviewRulerOptions: { color: options.color, position: 'left' as const } }
         : {}),
     });
-    if (!decoration) return false;
+    if (!decoration) return { tinted: false, settled };
     if (onTheRow) {
       decoration.onRender((element) => {
         // onRender fires again every time the row is re-laid-out (resize, scroll
@@ -670,11 +709,11 @@ export function applyHighlight(
       });
     }
     record.decorations.push(decoration);
-    return onTheRow;
+    return { tinted: onTheRow, settled };
   } catch {
     // Decorations are proposed API. A future xterm that changes the shape here
     // must degrade to "no highlight", never to a broken pane.
-    return false;
+    return { tinted: false, settled };
   }
 }
 
