@@ -281,6 +281,14 @@ describe('background shells in the sidebar (#276)', () => {
     expect(runningBackgroundShells(getActivity(surf) as any, Date.now())).toBe(1);
   });
 
+  it('does not broadcast an ending it already recorded (a subagent re-reads its tail on every tool call)', () => {
+    startShell('b1');
+    reportSubagent(surf, { id: 'shell:b1', done: true });
+    sendMock.mockClear();
+    expect(reportSubagent(surf, { id: 'shell:b1', done: true })).toBe(true);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it('ends with the session', () => {
     startShell('b1');
     endDeclaredSubagents(surf);

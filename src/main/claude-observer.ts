@@ -415,6 +415,10 @@ export function reportSubagent(surfaceId: SurfaceId, report: SubagentReport): bo
   if (!id) return false;
   const existing = activities.get(surfaceId)?.agents.find(a => a.id === id);
   if (!existing && report.done) return false;
+  // A subagent's background-shell endings are re-read from its transcript tail
+  // on every tool call it makes, so the same "done" arrives again and again.
+  // Ending a line that already ended changes nothing and must not broadcast.
+  if (existing?.done && report.done && isDoneOnly(report)) return true;
   const activity = getOrCreate(surfaceId);
   let agent = existing;
   if (!agent) {
@@ -471,6 +475,11 @@ export function applyExternalActivity(
 /**
  * Broadcast activity update to all renderer windows.
  */
+/** A report that only says "this line ended", with nothing else to record. */
+function isDoneOnly(report: SubagentReport): boolean {
+  return !report.name && report.detail === undefined && !report.toolUse && !report.kind;
+}
+
 function broadcast(surfaceId: SurfaceId, activity: ClaudeActivity): void {
   BrowserWindow.getAllWindows().forEach(win => {
     if (!win.isDestroyed()) {
