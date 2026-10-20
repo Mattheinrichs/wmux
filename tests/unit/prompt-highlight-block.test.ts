@@ -109,7 +109,10 @@ describe('the prompt block is the prompt’s own text', () => {
     expect(block).not.toBeNull();
     expect(block!.rows).toBe(2);
     expect(block!.startCol).toBe(rows[0].indexOf('a'));
-    expect(block!.endCol).toBe(rows[1].lastIndexOf('row') + 'row'.length - 1);
+    expect(block!.endCol).toBe(Math.max(
+      rows[0].lastIndexOf('that') + 'that'.length - 1,
+      rows[1].lastIndexOf('row') + 'row'.length - 1,
+    ));
   });
 
   it('answers null when the rows do not carry the prompt', () => {

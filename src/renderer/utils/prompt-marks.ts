@@ -262,8 +262,13 @@ export function refineMarkAbove(
   const lowest = Math.max(0, before - REFINE_BACK_ROWS);
   const highest = Math.min(before - 1, buf.baseY + terminal.rows - 1);
   for (let line = highest; line >= lowest; line--) {
-    if (needleRow(terminal, line, 1, needle) === null) continue;
-    return moveMark(terminal, surfaceId, entryId, record, line);
+    // The block matcher is what makes a WRAPPED first line findable: a row can
+    // carry only part of it, and the single-row needle cannot see that.
+    const block = locatePromptBlock(terminal, line, text);
+    if (block) return moveMark(terminal, surfaceId, entryId, record, block.line);
+    if (needleRow(terminal, line, 1, needle) !== null) {
+      return moveMark(terminal, surfaceId, entryId, record, line);
+    }
   }
   return null;
 }
@@ -315,7 +320,7 @@ export interface PromptBlock {
   rows: number;
   /** First raw column that carries the prompt's text. */
   startCol: number;
-  /** Last raw column that carries the prompt's text, inclusive. */
+  /** Rightmost raw column that carries any of the prompt's text, inclusive. */
   endCol: number;
 }
 
@@ -391,10 +396,10 @@ function consumeBlock(
       if (ptr === chars.length) break;
       const ch = raw[i];
       if (/\s/.test(ch)) { i++; continue; }
-      if (ptr === 0 && isBoxChar(ch)) { i++; continue; }
+      if (ptr === 0 && isBoxChar(ch) && chars[ptr] !== ch.toLowerCase()) { i++; continue; }
       if (ch.toLowerCase() !== chars[ptr]) return null;
       if (start < 0) start = i;
-      end = i;
+      end = Math.max(end, i);
       ptr++;
       i++;
     }
@@ -599,14 +604,14 @@ export function applyHighlight(
   // An uncheckable prompt falls back to what the SOURCE can promise: a shell's
   // row is named by OSC 133, an agent's is a guess.
   //
-  // A block, when the caller supplied the text, is checked on its FIRST row:
-  // that is where the prompt starts, and a later row still carrying a fragment
-  // is not enough to claim the band is on the text.
-  const found = needle
-    ? needleRow(terminal, record.marker.line, options.text ? 1 : height, needle)
+  // When the caller supplied the text, the block match IS the check: a wrapped
+  // first line is deliberately allowed to span rows, which a single-row needle
+  // cannot see.
+  const found = needle && !options.text
+    ? needleRow(terminal, record.marker.line, height, needle)
     : null;
   const onTheRow = options.text
-    ? block !== null && !deferred && (needle === null ? options.confirmed !== false : found !== null)
+    ? block !== null && !deferred
     : (needle ? found !== null : options.confirmed !== false);
   const tint = onTheRow ? blendOverBackground(options.color, backgroundOf(terminal)) : null;
   // Nothing left to draw: no band, and no tick asked for.
@@ -646,9 +651,13 @@ export function applyHighlight(
         element.classList.toggle('wmux-prompt-mark--css-tint', !tint);
         // Nothing to re-check when the tint rests on the caller's word rather
         // than on the row's text.
-        if (!needle || found === null) return;
-        const row = record.marker.line + found;
-        if (needleRow(terminal, row, 1, needle) !== null) return;
+        if (options.text) {
+          if (locatePromptBlock(terminal, record.marker.line, options.text)) return;
+        } else {
+          if (!needle || found === null) return;
+          const row = record.marker.line + found;
+          if (needleRow(terminal, row, 1, needle) !== null) return;
+        }
         // The row stopped carrying the prompt. Re-deciding means disposing this
         // decoration, which must not happen from inside xterm's own render pass
         // — it is iterating the decoration list right now. One deferred pass per
