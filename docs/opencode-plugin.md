@@ -90,13 +90,26 @@ wmux opencode-tui --remove   # remove, only when the file carries our marker
 - It is not installed automatically and does not need a wmux restart. Re-run
   the command after upgrading wmux: it compares the `// wmux-plugin-version:`
   marker on `tui.js` and rewrites both files when the shipped version differs.
-- **What it reports today** (issue #310 phase 1): the viewed session handle —
+- **Keep backups outside `plugins/`.** OpenCode loads *every* directory under
+  `<config>/plugins/` as a plugin, so a copy such as
+  `plugins/wmux-cli.bak/tui.js` registers the same `wmux.cli` id, shadows the
+  live one, and the symptom is silence: no `init` line and no reports. Move an
+  old copy to `~/wmux-cli.bak` instead of leaving it beside the plugin.
+- **What it reports today** (issue #310): the viewed session handle —
   `wmux report-session <id> --provider opencode` — so *Resume OpenCode sessions
   on restore* works for remote/shared setups. The viewed tab is followed
   reactively; a viewed subagent resolves to its root; quitting the TUI releases
   the handle.
-- **Next**: the prompt log and blocked/activity state from the same half.
-  Until then those stay server-half features.
+- **Prompts** (plugin v2): user prompts submitted in the pane enter the prompt
+  log through the same `UserPromptSubmit` event the server half sends (#304).
+  The source is v2's `session.inbox.enqueued` — only its `user` item counts, so
+  synthetic messages, compaction controls and moves never appear as something a
+  human typed. `inboxID` dedupes admission. The event stream is the connected
+  server's, so a prompt is attributed only when its session is the one being
+  viewed or is open in a tab — with several panes on one server, pane B's
+  prompt cannot land in pane A's outline.
+- **Next**: blocked/activity state from the same half. Until then those stay
+  server-half features.
 - `WMUX_PLUGIN_DEBUG` works as it does for the server half, into
   `wmux-tui-plugin-debug.log`, and logs each distinct TUI event type once —
   the diagnostic that will pick the prompt-submission signal.

@@ -221,3 +221,80 @@ export function createSessionReporter({ surface, callWmux: send, log = () => {} 
     },
   };
 }
+
+/**
+ * The cap `wmux-hook.js` and the server half apply to a prompt (#304). argv
+ * borne here rather than stdin, so it must stay well under the Windows
+ * command-line limit; 4000 is the number the other producers use.
+ */
+const MAX_PROMPT = 4000;
+
+/**
+ * The user prompt an inbox event carries, or null when it is not one (#310
+ * phase 2).
+ *
+ * OpenCode v2 announces prompt admission client-side as `session.inbox.enqueued`
+ * with `{ sessionID, inboxID, item }` and a tagged `item`: only `user` is
+ * something a human typed — synthetic messages, compaction controls and moves
+ * are the same set the server-side `session.prompt` hook excludes by itself.
+ * `inboxID` is the dedupe key; a replay of the same admission must not put two
+ * jump marks on one line.
+ */
+export function planPromptReport(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const { sessionID, inboxID, item } = payload;
+  if (!SESSION_ID_RE.test(sessionID)) return null;
+  if (!item || item.type !== "user") return null;
+  const text = item.payload && typeof item.payload.text === "string" ? item.payload.text : "";
+  if (!text.trim()) return null;
+  return { sessionID, inboxID: typeof inboxID === "string" && inboxID ? inboxID : null, text };
+}
+
+/**
+ * Whether a session belongs to THIS TUI: the one being viewed, or one open in
+ * a tab. The event stream is the connected server's, which with a shared or
+ * remote server carries other panes' sessions too — attributing those to this
+ * pane would put pane B's prompt in pane A's outline.
+ */
+export function isHostedSession(sessionID, { current, tabs } = {}) {
+  if (typeof sessionID !== "string" || !sessionID) return false;
+  if (sessionID === current) return true;
+  return Array.isArray(tabs) && tabs.includes(sessionID);
+}
+
+/** Session ids from `ui.tabs.list()`, defensively — the host shape is not ours. */
+export function tabSessionIds(list) {
+  if (!Array.isArray(list)) return [];
+  const ids = [];
+  for (const tab of list) {
+    const id = tab && (tab.sessionID || tab.sessionId || tab.id);
+    if (typeof id === "string" && id) ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Reports hosted user prompts through the same `hook.event` path the server
+ * half uses (#305): `caller` is stamped by the CLI transport, and the renderer
+ * resolves it for the prompt log only. `inboxID` dedupes admission; the
+ * renderer's identical-text window is the backstop when both halves run.
+ */
+export function createPromptReporter({ callWmux: send, log = () => {} }) {
+  const seen = new Set();
+  return {
+    observe(payload, hosted) {
+      if (!hosted) return;
+      const plan = planPromptReport(payload);
+      if (!plan) return;
+      if (plan.inboxID) {
+        if (seen.has(plan.inboxID)) return;
+        seen.add(plan.inboxID);
+        if (seen.size > 200) seen.delete(seen.values().next().value);
+      }
+      const text = plan.text.trim().slice(0, MAX_PROMPT);
+      if (!text) return;
+      log("prompt", { chars: text.length });
+      send(["hook", "--event", "UserPromptSubmit", "--prompt", text]);
+    },
+  };
+}

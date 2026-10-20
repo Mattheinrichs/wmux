@@ -1,11 +1,11 @@
-// wmux-plugin-version: 1
+// wmux-plugin-version: 2
 // wmux OpenCode CLI-side (TUI) plugin — the half that runs in the TUI process,
 // so a pane is attributable even when the server is remote or shared (#310).
 // Installed by `wmux opencode-tui` to <config>/plugins/wmux-cli/tui.js.
 // No-ops entirely outside wmux (WMUX !== '1').
 import { Plugin } from "@opencode/plugin/tui";
 import { createEffect, createRoot } from "solid-js";
-import { callWmux, createSessionReporter, makeLogger, resolveDebugLog, resolveNodeRuntime } from "./core.js";
+import { callWmux, createPromptReporter, createSessionReporter, isHostedSession, makeLogger, resolveDebugLog, resolveNodeRuntime, tabSessionIds } from "./core.js";
 
 export default Plugin.define({
   id: "wmux.cli",
@@ -29,6 +29,8 @@ export default Plugin.define({
 
     const send = (argv) => callWmux(runtime, argv, log);
     const reporter = createSessionReporter({ surface, callWmux: send, log });
+    const prompts = createPromptReporter({ callWmux: send, log });
+    let currentSession = null;
 
     // A viewed session is a store read, so the reporter follows navigation
     // reactively — no polling, and no lag behind the tab the user is on. The
@@ -38,6 +40,7 @@ export default Plugin.define({
       createEffect(() => {
         try {
           const route = ctx && ctx.ui && ctx.ui.router ? ctx.ui.router.current() : null;
+          currentSession = route && route.type === "session" && typeof route.sessionID === "string" ? route.sessionID : null;
           reporter.observe(route, (id) => {
             try {
               return ctx.data && ctx.data.session && typeof ctx.data.session.root === "function"
@@ -54,9 +57,41 @@ export default Plugin.define({
       return dispose;
     });
 
-    // Distinct event types only, once each. The prompt log's TUI-side capture
-    // (issue #310 phase 2) needs to know which client-side event announces a
-    // submitted prompt; this is the one-pass diagnostic that answers it.
+    // The event stream is the connected server's, which with a shared or
+    // remote server also carries other panes' sessions. Only the session this
+    // TUI is viewing, or one open in a tab, belongs to this pane.
+    const hostedNow = (sessionID) => {
+      let tabs = [];
+      try {
+        if (ctx && ctx.ui && ctx.ui.tabs && typeof ctx.ui.tabs.list === "function") {
+          tabs = tabSessionIds(ctx.ui.tabs.list());
+        }
+      } catch {}
+      return isHostedSession(sessionID, { current: currentSession, tabs });
+    };
+
+    // Prompt admission (#310 phase 2): `session.inbox.enqueued` is the
+    // client-side announcement, and its `user` item carries the text the server
+    // half would have read from `session.prompt` (#304). Synthetic, compaction
+    // and move items are excluded by the core.
+    let stopInbox = () => {};
+    try {
+      if (ctx && ctx.data && typeof ctx.data.on === "function") {
+        stopInbox = ctx.data.on("session.inbox.enqueued", (evt) => {
+          try {
+            const payload = evt && evt.data;
+            prompts.observe(payload, hostedNow(payload && payload.sessionID));
+          } catch (err) {
+            log("inbox: threw", (err && err.message) || String(err));
+          }
+        }) || (() => {});
+      }
+    } catch (err) {
+      log("inbox: subscribe failed", (err && err.message) || String(err));
+    }
+
+    // Distinct event types only, once each — the diagnostic that answered
+    // which event announces a prompt, kept for the blocked/activity phase.
     let stopEvents = () => {};
     try {
       if (ctx && ctx.data && typeof ctx.data.listen === "function") {
@@ -78,6 +113,7 @@ export default Plugin.define({
       if (released) return;
       released = true;
       reporter.dispose();
+      try { stopInbox(); } catch {}
       try { stopEvents(); } catch {}
       try { stopRoute(); } catch {}
     };
