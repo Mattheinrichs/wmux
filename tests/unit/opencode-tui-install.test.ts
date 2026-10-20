@@ -162,9 +162,10 @@ describe('the shipped entry file (#310)', () => {
   const coreSrc = fs.readFileSync(corePath, 'utf-8');
 
   it('carries a version marker, or installed copies never update', () => {
-    // v2 → v3 is #310 phase 3a (blocked state): without the bump every installed
-    // TUI half keeps reporting session handles and prompts only.
-    expect(src).toMatch(/wmux-plugin-version:\s*3/);
+    // v3 → v4 is #310 phase 3b (working/idle from execution events): without
+    // the bump every installed TUI half keeps reporting handles, prompts and
+    // blocked state only.
+    expect(src).toMatch(/wmux-plugin-version:\s*4/);
   });
 
   it('is a v2 CLI plugin definition and the only export', () => {
@@ -175,6 +176,17 @@ describe('the shipped entry file (#310)', () => {
 
   it('subscribes to the v2 prompt-admission event', () => {
     expect(src).toContain('session.inbox.enqueued');
+  });
+
+  it('subscribes to the execution events that drive working/idle', () => {
+    for (const type of [
+      'session.execution.started',
+      'session.execution.succeeded',
+      'session.execution.failed',
+      'session.execution.interrupted',
+    ]) {
+      expect(src).toContain(type);
+    }
   });
 
   it('subscribes to every blocked-state event the reporter understands', () => {

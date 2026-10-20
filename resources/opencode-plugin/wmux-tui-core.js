@@ -414,3 +414,51 @@ export function createBlockedReporter({ surface, callWmux: send, log = () => {} 
     },
   };
 }
+
+/**
+ * Declares whether this pane is working (#310 phase 3b).
+ *
+ * v2 opens a busy period with `session.execution.started` and ends it with
+ * exactly one of succeeded/failed/interrupted — the same pair the bundled TUI
+ * notifications plugin uses. Depth is ABSOLUTE (`--run-depth 0|1`): the same
+ * value means the same thing to every producer, so a second reporter converges
+ * instead of inflating a refcount.
+ *
+ * Running sessions are tracked by id, for the reason 01df550 fixed in the
+ * blocked reporter: the pane owns what it reported. An end clears its id even
+ * when the view has moved — hosting only gates the start — and a subagent's end
+ * cannot return the pane to idle while its parent is still running.
+ */
+export function createActivityReporter({ surface, callWmux: send, log = () => {} }) {
+  const running = new Set();
+  let reported = null;
+
+  const report = (depth) => {
+    if (reported === depth) return;
+    reported = depth;
+    log(depth ? "working" : "idle");
+    send(["report-agent", "--surface", surface, "--run-depth", depth ? "1" : "0"]);
+  };
+
+  return {
+    observe(type, data, hosted) {
+      if (!data || typeof data !== "object") return;
+      const sessionID = typeof data.sessionID === "string" ? data.sessionID : "";
+      if (!sessionID) return;
+      if (type === "session.execution.started") {
+        if (!hosted || running.has(sessionID)) return;
+        running.add(sessionID);
+        report(true);
+        return;
+      }
+      if (
+        type === "session.execution.succeeded" ||
+        type === "session.execution.failed" ||
+        type === "session.execution.interrupted"
+      ) {
+        if (!running.delete(sessionID)) return;
+        if (running.size === 0) report(false);
+      }
+    },
+  };
+}

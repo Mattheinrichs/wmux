@@ -328,6 +328,90 @@ describe('blocked state (#310 phase 3a)', () => {
   });
 });
 
+describe('working/idle (#310 phase 3b)', () => {
+  const reporterFor = async () => {
+    const { createActivityReporter } = await load();
+    const sent: string[][] = [];
+    const reporter = createActivityReporter({ surface: SURFACE, callWmux: (argv: string[]) => sent.push(argv) });
+    return { reporter, sent };
+  };
+  const ev = (sessionID: string, over: any = {}) => ({ sessionID, ...over });
+
+  const depths = (sent: string[][]) => sent.map((argv) => argv[4]);
+
+  it('marks a hosted turn as working with an ABSOLUTE depth — never --run-start', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    expect(sent).toEqual([['report-agent', '--surface', SURFACE, '--run-depth', '1']]);
+  });
+
+  it('returns to idle when the turn ends, deduping replays of the same transition', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), true);
+    expect(depths(sent)).toEqual(['1', '0']);
+  });
+
+  it('also ends on a failed or interrupted execution', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.interrupted', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.failed', ev('ses_abc12345', { error: {} }), true);
+    expect(depths(sent)).toEqual(['1', '0', '1', '0']);
+  });
+
+  it('clears the turn even after the view moved away — an end is not gated on hosting', async () => {
+    // The class of bug 01df550 fixed for replies: a turn this pane started must
+    // stop counting when it ends, whatever tab is on screen now.
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), false);
+    expect(depths(sent)).toEqual(['1', '0']);
+  });
+
+  it('ignores a turn in a session this TUI does not host', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_other999'), false);
+    reporter.observe('session.execution.succeeded', ev('ses_other999'), false);
+    expect(sent).toEqual([]);
+  });
+
+  it('stays working until the LAST running session ends', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.started', ev('ses_def67890'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_def67890'), true);
+    expect(depths(sent)).toEqual(['1', '0']);
+  });
+
+  it('an end for a session that never started here reports nothing', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), true);
+    expect(sent).toEqual([]);
+  });
+
+  it('never emits a refcount flag — two producers must converge, not inflate', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), true);
+    for (const argv of sent) {
+      expect(argv).not.toContain('--run-start');
+      expect(argv).not.toContain('--run-end');
+    }
+  });
+
+  it('ignores events without a session id', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('session.execution.started', {}, true);
+    reporter.observe('session.execution.started', null, true);
+    expect(sent).toEqual([]);
+  });
+});
+
 describe('callWmux (#310)', () => {
   const runtimeNode = { file: ':node:', electron: false };
 

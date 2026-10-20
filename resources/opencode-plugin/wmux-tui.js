@@ -1,11 +1,11 @@
-// wmux-plugin-version: 3
+// wmux-plugin-version: 4
 // wmux OpenCode CLI-side (TUI) plugin — the half that runs in the TUI process,
 // so a pane is attributable even when the server is remote or shared (#310).
 // Installed by `wmux opencode-tui` to <config>/plugins/wmux-cli/tui.js.
 // No-ops entirely outside wmux (WMUX !== '1').
 import { Plugin } from "@opencode/plugin/tui";
 import { createEffect, createRoot } from "solid-js";
-import { callWmux, createBlockedReporter, createPromptReporter, createSessionReporter, eventSessionID, isHostedSession, makeLogger, resolveDebugLog, resolveNodeRuntime, tabSessionIds } from "./core.js";
+import { callWmux, createActivityReporter, createBlockedReporter, createPromptReporter, createSessionReporter, eventSessionID, isHostedSession, makeLogger, resolveDebugLog, resolveNodeRuntime, tabSessionIds } from "./core.js";
 
 export default Plugin.define({
   id: "wmux.cli",
@@ -31,7 +31,19 @@ export default Plugin.define({
     const reporter = createSessionReporter({ surface, callWmux: send, log });
     const prompts = createPromptReporter({ callWmux: send, log });
     const blockedState = createBlockedReporter({ surface, callWmux: send, log });
+    const activity = createActivityReporter({ surface, callWmux: send, log });
     let currentSession = null;
+
+    /** The root a session belongs to — a viewed subagent is not the pane's run. */
+    const rootOf = (id) => {
+      try {
+        return ctx.data && ctx.data.session && typeof ctx.data.session.root === "function"
+          ? ctx.data.session.root(id)
+          : id;
+      } catch {
+        return id;
+      }
+    };
 
     // A viewed session is a store read, so the reporter follows navigation
     // reactively — no polling, and no lag behind the tab the user is on. The
@@ -42,15 +54,7 @@ export default Plugin.define({
         try {
           const route = ctx && ctx.ui && ctx.ui.router ? ctx.ui.router.current() : null;
           currentSession = route && route.type === "session" && typeof route.sessionID === "string" ? route.sessionID : null;
-          reporter.observe(route, (id) => {
-            try {
-              return ctx.data && ctx.data.session && typeof ctx.data.session.root === "function"
-                ? ctx.data.session.root(id)
-                : id;
-            } catch {
-              return id;
-            }
-          });
+          reporter.observe(route, rootOf);
         } catch (err) {
           log("route: threw", (err && err.message) || String(err));
         }
@@ -122,8 +126,35 @@ export default Plugin.define({
       }
     }
 
+    // Working/idle (#310 phase 3b): absolute `--run-depth` values from the
+    // execution events. An end always clears its session id, even after the
+    // view moved — hosting only gates a start.
+    const stopActivity = [];
+    for (const type of [
+      "session.execution.started",
+      "session.execution.succeeded",
+      "session.execution.failed",
+      "session.execution.interrupted",
+    ]) {
+      try {
+        if (ctx && ctx.data && typeof ctx.data.on === "function") {
+          const stop = ctx.data.on(type, (evt) => {
+            try {
+              const data = evt && evt.data;
+              activity.observe(type, data, hostedNow(rootOf(eventSessionID(type, data))));
+            } catch (err) {
+              log(`activity: ${type} threw`, (err && err.message) || String(err));
+            }
+          });
+          if (typeof stop === "function") stopActivity.push(stop);
+        }
+      } catch (err) {
+        log(`activity: ${type} subscribe failed`, (err && err.message) || String(err));
+      }
+    }
+
     // Distinct event types only, once each — the diagnostic that answered
-    // which event announces a prompt, kept for the activity phase.
+    // which event announces a prompt.
     let stopEvents = () => {};
     try {
       if (ctx && ctx.data && typeof ctx.data.listen === "function") {
@@ -147,6 +178,7 @@ export default Plugin.define({
       reporter.dispose();
       try { stopInbox(); } catch {}
       for (const stop of stopBlocked) { try { stop(); } catch {} }
+      for (const stop of stopActivity) { try { stop(); } catch {} }
       try { stopEvents(); } catch {}
       try { stopRoute(); } catch {}
     };

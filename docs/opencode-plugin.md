@@ -117,11 +117,15 @@ wmux opencode-tui --remove   # remove, only when the file carries our marker
   every one answered, a reply to an ask the pane raised counts even after its
   session left the screen, a turn failure clears only that session's asks,
   and a replay of an ask — answered or not — never raises "Needs you" twice.
-- **Next**: working/idle from `session.execution.*` using absolute
-  `report-agent --run-depth` values; tool labels stay out.
+- **Working/idle** (plugin v4): `session.execution.started` declares
+  `report-agent --run-depth 1`; `succeeded`/`failed`/`interrupted` declare
+  `--run-depth 0`. The values are absolute, so a second producer converges
+  instead of inflating a refcount. Running sessions are tracked by id: an end
+  still clears after the user switches tabs, and a subagent's end cannot return
+  a pane to idle while its parent is still running. Tool labels stay out.
 - `WMUX_PLUGIN_DEBUG` works as it does for the server half, into
   `wmux-tui-plugin-debug.log`, and logs each distinct TUI event type once —
-  the diagnostic that will pick the prompt-submission signal.
+  which is how the prompt-submission signal was identified.
 - WSL needs the same prerequisites as any wmux CLI call from inside the
   distro: `WMUX_*` arrives via `WSLENV`, and the named pipe is reached through
   `npiperelay.exe` automatically (`docs/DEVCONTAINER.md`).
