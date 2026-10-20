@@ -325,6 +325,19 @@ export default function WorkspaceSettings() {
       </p>
 
       <div className="settings-row">
+        <label className="settings-label">{t('settings.workspacePanel.restoreQwenSessions', 'Resume Qwen Code sessions on restore')}</label>
+        <input
+          type="checkbox"
+          className="settings-toggle"
+          checked={workspacePrefs.restoreQwenSessions}
+          onChange={(e) => setWorkspacePrefs({ restoreQwenSessions: e.target.checked })}
+        />
+      </div>
+      <p className="settings-hint">
+        {t('settings.workspacePanel.restoreQwenSessionsHint', "Re-launches each restored tab that was running Qwen Code with `qwen --resume`, in the directory it was in. Needs the wmux Qwen hooks (Status hooks on) and Qwen Code 0.14 or later. Tabs whose session Qwen no longer has are skipped, and a Qwen you exited cleanly is not resumed.")}
+      </p>
+
+      <div className="settings-row">
         <label className="settings-label">{t('settings.workspacePanel.detectAgentScreens', 'Read agent screens to infer state')}</label>
         <input
           type="checkbox"

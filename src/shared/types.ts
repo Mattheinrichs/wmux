@@ -98,6 +98,12 @@ export interface SurfaceRef {
    * when `workspacePrefs.restoreAgySessions` is on.
    */
   agySessionId?: string;
+  /**
+   * Qwen Code session to resume, stamped by `stampQwenSessionIds` from the
+   * `session_id` wmux's Qwen hooks report. Restored as `qwen --resume <id>`
+   * when `workspacePrefs.restoreQwenSessions` is on.
+   */
+  qwenSessionId?: string;
   /** Initial URL for a browser surface created from a quick-launch profile (issue #32). */
   url?: string;
   /**

@@ -84,9 +84,12 @@ export function withClaudeResume(opts: {
   opencodeEnabled?: boolean;
   agySessionId?: string;
   agyEnabled?: boolean;
+  qwenSessionId?: string;
+  qwenEnabled?: boolean;
 }): string[] | undefined {
   const { base, surfaceId, claudeSessionId, enabled } = opts;
   if (!surfaceId) return base;
+  if (opts.qwenSessionId) return withQwenResume(base, surfaceId, opts);
   if (opts.agySessionId) {
     // One provider per tab, as for Codex and OpenCode.
     if (claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || !opts.agyEnabled) return base;
@@ -115,4 +118,23 @@ export function withClaudeResume(opts: {
   // user can edit, and it is about to become a command line.
   if (!SESSION_ID_RE.test(claudeSessionId)) return base;
   return applyResume(base, surfaceId, 'claude', claudeSessionId);
+}
+
+/**
+ * The Qwen Code branch of {@link withClaudeResume}: one provider per tab, so a
+ * tab that also carries another agent's handle is a state nothing wrote on
+ * purpose and resumes nothing.
+ */
+function withQwenResume(
+  base: string[] | undefined,
+  surfaceId: string,
+  opts: { qwenSessionId?: string; qwenEnabled?: boolean; claudeSessionId?: string; codexSessionId?: string; opencodeSessionId?: string; agySessionId?: string },
+): string[] | undefined {
+  const id = opts.qwenSessionId;
+  if (!id || !opts.qwenEnabled) return base;
+  if (opts.claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId) return base;
+  // Mirrors QWEN_SESSION_ID_RE in src/main/qwen-resume.ts — re-checked because
+  // session.json is a file the user can edit.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return base;
+  return applyResume(base, surfaceId, 'qwen', id);
 }

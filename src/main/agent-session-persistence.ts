@@ -3,6 +3,7 @@ import { mapSurfaces, stampClaudeSessionIds } from './claude-resume';
 import { stampCodexSessionIds } from './codex-resume';
 import { stampOpencodeSessionIds } from './opencode-resume';
 import { stampAgySessionIds } from './agy-resume';
+import { stampQwenSessionIds } from './qwen-resume';
 import type { AgentSessionProvider } from './agent-state';
 import type { SurfaceId } from '../shared/types';
 
@@ -40,5 +41,6 @@ export function stampAgentSessionIds<T>(tree: T): T {
   const claude = stampClaudeSessionIds(tree, providerLookup('claude'));
   const codex = dropMissingCodexIds(stampCodexSessionIds(claude, providerLookup('codex')));
   const opencode = stampOpencodeSessionIds(codex, providerLookup('opencode'));
-  return stampAgySessionIds(opencode, providerLookup('agy'));
+  const agy = stampAgySessionIds(opencode, providerLookup('agy'));
+  return stampQwenSessionIds(agy, providerLookup('qwen'));
 }

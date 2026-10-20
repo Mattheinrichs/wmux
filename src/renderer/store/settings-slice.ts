@@ -528,6 +528,7 @@ export interface WorkspacePrefs {
    * `agy --conversation <id>`. Off by default, like the others.
    */
   restoreAgySessions: boolean;
+  restoreQwenSessions: boolean;
   /**
    * How many terminal panes a new workspace opens with, and how they sit
    * (issue #212).
@@ -581,6 +582,7 @@ export const DEFAULT_WORKSPACE_PREFS: WorkspacePrefs = {
   restoreCodexSessions: false,
   restoreOpencodeSessions: false,
   restoreAgySessions: false,
+  restoreQwenSessions: false,
   detectAgentScreens: true,
   newWorkspacePanes: 3,
   newWorkspaceLayout: 'grid',

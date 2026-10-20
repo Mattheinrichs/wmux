@@ -61,6 +61,7 @@ import {
   pruneDeadClaudeSessions,
   listKnownTranscriptIds,
 } from './claude-resume';
+import { pruneDeadQwenSessions, listKnownQwenSessionIds } from './qwen-resume';
 import { sessionWindows, MAX_RESTORED_WINDOWS } from './session-windows';
 import { WindowManager, appIconCandidates } from './window-manager';
 import { initAutoUpdater, requestUpdateNow, getUpdateState } from './updater';
@@ -1283,8 +1284,16 @@ function handleHookEvent(params: any): void {
   // record microseconds later and hand the next restore a conversation the user
   // deliberately quit. "Exit Claude, restart wmux, get a plain shell" is the
   // behaviour #186 asked to keep, and this ordering is the only thing enforcing it.
+  //
+  // Qwen Code runs the same hooks out of its own settings.json, registered with
+  // `--provider qwen` (qwen-context.ts) — so its id is filed as Qwen's and comes
+  // back as `qwen --resume`, never as a `claude --resume` naming a conversation
+  // Claude has never seen. Any other value is Claude, as it always was.
   if (params?.surfaceId && params?.sessionId && hookEvent !== 'SessionEnd') {
-    reportAgentSession(params.surfaceId as SurfaceId, { sessionId: String(params.sessionId) });
+    reportAgentSession(params.surfaceId as SurfaceId, {
+      sessionId: String(params.sessionId),
+      provider: params.provider === 'qwen' ? 'qwen' : undefined,
+    });
   }
 
   // Always refresh the diff for Edit/Write, even without a file path — but only
@@ -1337,6 +1346,24 @@ function pruneRestoredClaudeSessions(windows: SavedWindow[]): void {
   }
   if (dropped > 0) {
     console.log(`[claude-resume] dropped ${dropped} session id(s) with no transcript`);
+  }
+}
+
+/** The same pruning for Qwen Code: a `qwen --resume` of a deleted session exits 1. */
+function pruneRestoredQwenSessions(windows: SavedWindow[]): void {
+  if (windows.length === 0) return;
+  const known = listKnownQwenSessionIds();
+  if (!known) return; // Qwen never ran here / unreadable — keep everything.
+  let dropped = 0;
+  for (const state of windows) {
+    for (const ws of state.workspaces ?? []) {
+      const result = pruneDeadQwenSessions(ws.splitTree, known);
+      ws.splitTree = result.tree;
+      dropped += result.dropped;
+    }
+  }
+  if (dropped > 0) {
+    console.log(`[qwen-resume] dropped ${dropped} session id(s) with no transcript`);
   }
 }
 
@@ -1505,6 +1532,7 @@ app.whenReady().then(() => {
   const savedSession = loadSession();
   const savedWindows = (savedSession?.windows ?? []).slice(0, MAX_RESTORED_WINDOWS);
   pruneRestoredClaudeSessions(savedWindows);
+  pruneRestoredQwenSessions(savedWindows);
   if (savedWindows.length === 0) {
     sessionWindows.markStartup(windowManager.createWindow());
   } else {
@@ -1686,29 +1714,32 @@ app.whenReady().then(() => {
 
     // Back at a prompt: whatever was running has exited, so both the ssh
     // session and the agent the preexec hook reported are over.
-    if (cmd.command === 'report_shell_state') {
-      const sequenced = /^seq=\d+$/.test(cmd.args[0] ?? '');
-      const state = cmd.args[sequenced ? 1 : 0] ?? '';
-      const rawSequence = sequenced ? cmd.args[0] : undefined;
-      if (state !== 'running') {
-        sshDetector.clearReported(surfaceId, rawSequence);
-        const ran = agentIdentity.identify(surfaceId);
-        // `sequenceFrom`, not `splitSequencedReport`: here the marker is the
-        // WHOLE argument (`seq=7`), and splitSequencedReport deliberately reads
-        // a bare marker with no payload as a payload.
-        const cleared = agentIdentity.clearReported(surfaceId, sequenceFrom(rawSequence));
-        broadcastAgentIdentity(surfaceId);
-        // agy has no session-end hook: its shell coming back is its exit. A
-        // quitting wmux kills the shell rather than returning to it, but keep
-        // the same refusal every other release has.
-        if (cleared && !isQuitting) {
-          releaseAgyAtPrompt(surfaceId as SurfaceId, ran?.source === 'command' && ran.kind === 'agy');
-        }
+    if (cmd.command === 'report_shell_state') applyShellStateReport(surfaceId, cmd);
+  }
+
+  /** `report_shell_state`: back at a prompt, so the ssh session and the agent are over. */
+  function applyShellStateReport(surfaceId: string, cmd: { args: string[] }): void {
+    const sequenced = /^seq=\d+$/.test(cmd.args[0] ?? '');
+    const state = cmd.args[sequenced ? 1 : 0] ?? '';
+    const rawSequence = sequenced ? cmd.args[0] : undefined;
+    if (state !== 'running') {
+      sshDetector.clearReported(surfaceId, rawSequence);
+      const ran = agentIdentity.identify(surfaceId);
+      // `sequenceFrom`, not `splitSequencedReport`: here the marker is the
+      // WHOLE argument (`seq=7`), and splitSequencedReport deliberately reads
+      // a bare marker with no payload as a payload.
+      const cleared = agentIdentity.clearReported(surfaceId, sequenceFrom(rawSequence));
+      broadcastAgentIdentity(surfaceId);
+      // agy has no session-end hook: its shell coming back is its exit. A
+      // quitting wmux kills the shell rather than returning to it, but keep
+      // the same refusal every other release has.
+      if (cleared && !isQuitting) {
+        releaseAgyAtPrompt(surfaceId as SurfaceId, ran?.source === 'command' && ran.kind === 'agy');
       }
-      // The renderer's metadata protocol remains [state]; sequencing is a
-      // main-process implementation detail used only by these two detectors.
-      if (sequenced) cmd.args = [state];
     }
+    // The renderer's metadata protocol remains [state]; sequencing is a
+    // main-process implementation detail used only by these two detectors.
+    if (sequenced) cmd.args = [state];
   }
 
   pipeServer.on('v1', (cmd) => {

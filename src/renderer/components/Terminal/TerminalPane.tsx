@@ -26,6 +26,8 @@ interface TerminalPaneProps {
   opencodeSessionId?: string;
   /** Antigravity CLI conversation to resume on a restored pane. */
   agySessionId?: string;
+  /** Qwen Code session to resume on a restored pane. */
+  qwenSessionId?: string;
   focused?: boolean;
   visible?: boolean;
   showFindBar?: boolean;
@@ -44,13 +46,14 @@ export default function TerminalPane({
   codexSessionId,
   opencodeSessionId,
   agySessionId,
+  qwenSessionId,
   focused = true,
   visible = true,
   showFindBar = false,
   onFindBarClose,
   copyModeActive = false,
 }: TerminalPaneProps) {
-  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId });
+  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId });
 
   const [_lastQuery, setLastQuery] = useState('');
 

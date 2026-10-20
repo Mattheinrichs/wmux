@@ -35,13 +35,13 @@ const FEATURES: Array<{ key: Feature; labelKey: TranslationKey; labelFallback: s
     key: 'instructions',
     labelKey: 'settings.integration.instructions',
     labelFallback: 'Agent instructions',
-    pathHint: '~/.claude/CLAUDE.md · ~/.config/opencode/AGENTS.md · ~/.kiro/steering/wmux.md · ~/.omp/agent/AGENTS.md · ~/.pi/agent/AGENTS.md · ~/.grok/rules/wmux.md',
+    pathHint: '~/.claude/CLAUDE.md · ~/.config/opencode/AGENTS.md · ~/.kiro/steering/wmux.md · ~/.omp/agent/AGENTS.md · ~/.pi/agent/AGENTS.md · ~/.grok/rules/wmux.md · ~/.qwen/QWEN.md',
   },
   {
     key: 'hooks',
     labelKey: 'settings.integration.hooks',
     labelFallback: 'Status hooks',
-    pathHint: '~/.claude/settings.json · ~/.pi/agent/extensions/wmux.js · ~/.grok/hooks/wmux.json · ~/.gemini/config/plugins/wmux/',
+    pathHint: '~/.claude/settings.json · ~/.pi/agent/extensions/wmux.js · ~/.grok/hooks/wmux.json · ~/.gemini/config/plugins/wmux/ · ~/.qwen/settings.json',
   },
   {
     key: 'orchestrator',
@@ -58,7 +58,7 @@ const FEATURES: Array<{ key: Feature; labelKey: TranslationKey; labelFallback: s
     key: 'browserMcp',
     labelKey: 'settings.integration.browserMcp',
     labelFallback: 'Browser panel for MCP',
-    pathHint: '~/.claude/settings.json',
+    pathHint: '~/.claude.json · ~/.qwen/settings.json',
   },
 ];
 

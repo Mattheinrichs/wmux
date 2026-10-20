@@ -33,6 +33,7 @@ import { isValidClaudeSessionId } from './claude-resume';
 import { isValidCodexSessionId } from './codex-resume';
 import { isValidOpencodeSessionId } from './opencode-resume';
 import { isValidAgyConversationId } from './agy-resume';
+import { isValidQwenSessionId } from './qwen-resume';
 import { resolveWireChoiceId } from '../shared/remote-console-protocol';
 
 export type AgentRunState = 'blocked' | 'working' | 'idle' | 'unknown';
@@ -443,15 +444,16 @@ export function reportAgent(surfaceId: SurfaceId, params: ReportAgentParams): Ag
 }
 
 /** Who a session handle belongs to — it decides the validator and the restore command. */
-export type AgentSessionProvider = 'claude' | 'codex' | 'opencode' | 'agy';
+export type AgentSessionProvider = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen';
 const SESSION_VALIDATORS: Record<AgentSessionProvider, (id: unknown) => id is string> = {
   claude: isValidClaudeSessionId,
   codex: isValidCodexSessionId,
   opencode: isValidOpencodeSessionId,
   agy: isValidAgyConversationId,
+  qwen: isValidQwenSessionId,
 };
 function isSessionProvider(value: unknown): value is AgentSessionProvider {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'agy';
+  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'agy' || value === 'qwen';
 }
 
 /** `pane.report_agent_session` — tie the pane to a resumable session handle. */
@@ -468,9 +470,10 @@ export function reportAgentSession(
   if (!isSessionProvider(requested)) return null;
   const provider: AgentSessionProvider = requested;
   const sessionId = SESSION_VALIDATORS[provider](params.sessionId) ? params.sessionId : null;
-  // Claude's handle comes with its hooks, which declare state too. Codex's and
-  // OpenCode's arrive on their own, and say nothing about whether it is working.
-  const sessionOnly = provider !== 'claude' && !records.has(surfaceId);
+  // Claude's handle comes with its hooks, which declare state too — and so does
+  // Qwen's, through the same hooks. Codex's and OpenCode's arrive on their own,
+  // and say nothing about whether it is working.
+  const sessionOnly = provider !== 'claude' && provider !== 'qwen' && !records.has(surfaceId);
   const record = getOrCreate(surfaceId);
   if (!acceptSeq(record, params.seq)) return null;
   if (sessionOnly) record.sessionOnly = true;

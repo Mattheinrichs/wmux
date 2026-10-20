@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * wmux hook helper — sends a hook event to the wmux pipe.
- * Called by Claude Code hooks (PostToolUse, Notification, Stop, SubagentStop).
+ * Called by Claude Code hooks (PostToolUse, Notification, Stop, SubagentStop),
+ * and by the same hooks registered in Qwen Code's settings with `--provider qwen`.
  *
  * Usage:
  *   node wmux-hook.js <tool-name>        # PostToolUse — sidebar/diff tracking
@@ -26,6 +27,15 @@ if (argv[0] === '--event') {
 } else {
   tool = argv[0] || 'unknown';
 }
+
+/**
+ * Which agent registered this hook. Only Qwen Code says (qwen-context.ts writes
+ * `--provider qwen` on every command it registers); everything else is Claude
+ * Code, or an agent reading Claude Code's hooks (Grok).
+ */
+const providerIndex = argv.indexOf('--provider');
+const provider = providerIndex === -1 ? '' : (argv[providerIndex + 1] ?? '');
+const isQwen = provider === 'qwen';
 
 /**
  * When Claude Code fired this hook, near enough (issue #151).
@@ -316,6 +326,52 @@ function readBackgroundTasks(data: Record<string, any>, toolInput: any, toolName
   if (event === 'SessionStart' && data.source === 'startup') out.freshSession = true;
 }
 
+/**
+ * Qwen Code's runtime tool ids, in the Claude spelling every consumer in wmux
+ * already reads (the sidebar label, the diff refresh on Edit/Write). An id not
+ * listed passes through unchanged — an unknown tool is still a tool running.
+ */
+const QWEN_TOOL_NAMES: Record<string, string> = {
+  run_shell_command: 'Bash',
+  read_file: 'Read',
+  read_many_files: 'Read',
+  write_file: 'Write',
+  edit: 'Edit',
+  replace: 'Edit',
+  grep_search: 'Grep',
+  search_file_content: 'Grep',
+  glob: 'Glob',
+  list_directory: 'Glob',
+  web_fetch: 'WebFetch',
+  web_search: 'WebSearch',
+  task: 'Agent',
+  agent: 'Agent',
+  skill: 'Skill',
+  todo_write: 'TodoWrite',
+};
+
+/** A Qwen session id: the strict UUID Qwen itself accepts (qwen-resume.ts). */
+const QWEN_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Where Qwen Code's payload means something different from Claude Code's.
+ *
+ * - `tool_name` is Qwen's runtime id (`run_shell_command`), not Claude's name.
+ * - `UserPromptSubmit` also fires for tool-result and hook continuations, whose
+ *   `prompt` is not something a human typed. Only `submitted_prompt` is — so
+ *   the prompt log reads that, and a continuation logs nothing.
+ * - A subagent's events may carry `<uuid>-agent-<name>`, which is not a session
+ *   `qwen --resume` can open. Only a bare UUID is forwarded, so such an event
+ *   cannot overwrite the pane's real handle.
+ */
+function adaptQwenFields(data: Record<string, any>, out: HookPayloadFields): void {
+  if (out.toolName) out.toolName = QWEN_TOOL_NAMES[out.toolName] ?? out.toolName;
+  if (event === 'UserPromptSubmit') {
+    out.prompt = typeof data.submitted_prompt === 'string' ? data.submitted_prompt.slice(0, MAX_PROMPT) : '';
+  }
+  if (!QWEN_SESSION_ID_RE.test(out.sessionId)) out.sessionId = '';
+}
+
 function parsePayload(raw: string): HookPayloadFields {
   const out: HookPayloadFields = {
     file: '', message: '', sessionId: '', toolName: '', prompt: '', notificationType: '', subagent: false,
@@ -332,8 +388,16 @@ function parsePayload(raw: string): HookPayloadFields {
     // not also cost the user `claude --resume` on their next restore (issue
     // #186), and `session_id` survives in the raw text where the rest does not.
     out.sessionId = salvageSessionId(raw);
+    if (isQwen) adaptQwenFields({}, out);
     return out;
   }
+  readPayloadFields(data, out);
+  if (isQwen) adaptQwenFields(data, out);
+  return out;
+}
+
+/** Every field wmux forwards, read off a parsed payload into `out`. */
+function readPayloadFields(data: Record<string, any>, out: HookPayloadFields): void {
   // Grok Build runs these same hooks out of ~/.claude/settings.json (its Claude
   // compatibility, on by default) but sends a camelCase envelope: `toolInput`,
   // `toolName`, `notificationType`. Read both spellings, or every Grok
@@ -386,7 +450,6 @@ function parsePayload(raw: string): HookPayloadFields {
     out.prompt = data.prompt.slice(0, MAX_PROMPT);
   }
   readBackgroundTasks(data, toolInput, toolName, out);
-  return out;
 }
 
 /**
@@ -430,6 +493,9 @@ function hookParams(fields: HookPayloadFields): Record<string, string | number> 
     // ends up on a `claude --resume` command line at restore — naming a session
     // Claude has never seen.
     sessionId: process.env.GROK_HOOK_EVENT ? '' : sessionId,
+    // Whose session id that is: main files it under this provider and restores
+    // it with that agent's resume command. Absent means Claude.
+    provider: isQwen ? 'qwen' : '',
   };
   for (const [key, value] of Object.entries(optional)) {
     if (value) params[key] = value;
