@@ -298,3 +298,93 @@ export function createPromptReporter({ callWmux: send, log = () => {} }) {
     },
   };
 }
+
+/** The 200-char bound the server half's `askReason` applies to a block reason. */
+const MAX_REASON = 200;
+
+/** Where a blocked-state event keeps its session id: forms nest it in `form`. */
+export function eventSessionID(type, data) {
+  if (!data || typeof data !== "object") return null;
+  const id = type === "form.created" ? data.form && data.form.sessionID : data.sessionID;
+  return typeof id === "string" && id ? id : null;
+}
+
+/**
+ * Reports whether the pane is parked on a human (#310 phase 3a), from the TUI
+ * side.
+ *
+ * v2 announces what the server half reads as `question.asked`/`permission.asked`
+ * as `form.created` and `permission.asked`; replies and cancellations are the
+ * explicit "the human dealt with it" events. Tool and streaming events are
+ * deliberately NOT unblocks — the ask's own tool part transitions state within
+ * a frame of the ask (#189), and a block that clears itself is worse than one
+ * that lingers.
+ *
+ * One boolean, like the server half: overlapping asks are rare and the
+ * declared state is `awaitingHuman`, not a count. Replays are deduped by the
+ * request/form id so a repeated event cannot spam "Needs you".
+ */
+export function createBlockedReporter({ surface, callWmux: send, log = () => {} }) {
+  const permissions = new Set();
+  const forms = new Set();
+  let blocked = false;
+
+  const block = (reason, fallback) => {
+    const text = (typeof reason === "string" && reason.trim()) || fallback;
+    if (!text) return;
+    blocked = true;
+    const capped = text.slice(0, MAX_REASON);
+    log("blocked", { chars: capped.length });
+    send(["report-agent", "--surface", surface, "--blocked", capped]);
+  };
+  const unblock = () => {
+    if (!blocked) return;
+    blocked = false;
+    permissions.clear();
+    forms.clear();
+    log("unblocked");
+    send(["report-agent", "--surface", surface, "--unblocked"]);
+  };
+
+  return {
+    observe(type, data, hosted) {
+      if (!hosted || !data || typeof data !== "object") return;
+      switch (type) {
+        case "permission.asked": {
+          const id = typeof data.id === "string" && data.id ? data.id : null;
+          if (id) {
+            if (permissions.has(id)) return;
+            permissions.add(id);
+          }
+          block(data.message, data.action || "Permission requested");
+          return;
+        }
+        case "form.created": {
+          const form = data.form && typeof data.form === "object" ? data.form : {};
+          const id = typeof form.id === "string" && form.id ? form.id : null;
+          if (id) {
+            if (forms.has(id)) return;
+            forms.add(id);
+          }
+          block(form.title, "Input requested");
+          return;
+        }
+        case "permission.replied":
+          if (typeof data.requestID === "string") permissions.delete(data.requestID);
+          unblock();
+          return;
+        case "form.replied":
+        case "form.cancelled":
+          if (typeof data.id === "string") forms.delete(data.id);
+          unblock();
+          return;
+        case "session.execution.interrupted":
+        case "session.execution.failed":
+          unblock();
+          return;
+        default:
+          return;
+      }
+    },
+  };
+}

@@ -208,6 +208,91 @@ describe('prompt capture (#310 phase 2)', () => {
   });
 });
 
+describe('blocked state (#310 phase 3a)', () => {
+  const reporterFor = async () => {
+    const { createBlockedReporter } = await load();
+    const sent: string[][] = [];
+    const reporter = createBlockedReporter({ surface: SURFACE, callWmux: (argv: string[]) => sent.push(argv) });
+    return { reporter, sent };
+  };
+  const asked = (over: any = {}) => ({
+    id: 'per_1',
+    sessionID: 'ses_abc12345',
+    action: 'bash',
+    resources: ['rm -rf build'],
+    ...over,
+  });
+
+  it('reports a permission ask as blocked, preferring the human-readable message', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked({ message: 'Run rm -rf build?' }), true);
+    expect(sent).toEqual([['report-agent', '--surface', SURFACE, '--blocked', 'Run rm -rf build?']]);
+  });
+
+  it('falls back to the action, then to a generic reason', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    expect(sent[0][4]).toBe('bash');
+    reporter.observe('permission.replied', { requestID: 'per_1' }, true);
+    reporter.observe('permission.asked', asked({ id: 'per_2', action: '' }), true);
+    expect(sent[2][4]).toBe('Permission requested');
+  });
+
+  it('reports a form as blocked with its title', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('form.created', { form: { id: 'frm_1', sessionID: 'ses_abc12345', title: 'Which database?' } }, true);
+    expect(sent).toEqual([['report-agent', '--surface', SURFACE, '--blocked', 'Which database?']]);
+  });
+
+  it('dedupes a replayed ask by its id — one "Needs you", not one per replay', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('form.created', { form: { id: 'frm_1', sessionID: 'ses_abc12345', title: 'Q' } }, true);
+    reporter.observe('form.created', { form: { id: 'frm_1', sessionID: 'ses_abc12345', title: 'Q' } }, true);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('unblocks on a reply, a form reply/cancel, or a turn-ending failure — once', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('permission.replied', { requestID: 'per_1', reply: 'once' }, true);
+    reporter.observe('permission.replied', { requestID: 'per_1', reply: 'once' }, true);
+    expect(sent.map((argv: string[]) => argv[3])).toEqual(['--blocked', '--unblocked']);
+
+    reporter.observe('form.created', { form: { id: 'frm_2', sessionID: 'ses_abc12345', title: 'Q' } }, true);
+    reporter.observe('form.cancelled', { id: 'frm_2' }, true);
+    reporter.observe('permission.asked', asked({ id: 'per_3' }), true);
+    reporter.observe('session.execution.failed', { sessionID: 'ses_abc12345', error: {} }, true);
+    expect(sent.map((argv: string[]) => argv[3])).toEqual([
+      '--blocked', '--unblocked', '--blocked', '--unblocked', '--blocked', '--unblocked',
+    ]);
+  });
+
+  it('does nothing on an unhosted session, or when there was nothing blocked', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), false);
+    reporter.observe('permission.replied', { requestID: 'per_1' }, false);
+    reporter.observe('permission.replied', { requestID: 'per_1' }, true);
+    expect(sent).toEqual([]);
+  });
+
+  it('caps the reason at 200 chars, the same bound the server half applies', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked({ message: 'x'.repeat(500) }), true);
+    expect(sent[0][4].length).toBe(200);
+  });
+
+  it('knows where each event keeps its session id', async () => {
+    const { eventSessionID } = await load();
+    expect(eventSessionID('permission.asked', asked())).toBe('ses_abc12345');
+    expect(eventSessionID('form.created', { form: { sessionID: 'ses_abc12345' } })).toBe('ses_abc12345');
+    expect(eventSessionID('session.execution.started', { sessionID: 'ses_abc12345' })).toBe('ses_abc12345');
+    expect(eventSessionID('form.created', {})).toBeNull();
+    expect(eventSessionID('permission.asked', null)).toBeNull();
+  });
+});
+
 describe('callWmux (#310)', () => {
   const runtimeNode = { file: ':node:', electron: false };
 

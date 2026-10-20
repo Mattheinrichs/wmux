@@ -108,8 +108,14 @@ wmux opencode-tui --remove   # remove, only when the file carries our marker
   server's, so a prompt is attributed only when its session is the one being
   viewed or is open in a tab — with several panes on one server, pane B's
   prompt cannot land in pane A's outline.
-- **Next**: blocked/activity state from the same half. Until then those stay
-  server-half features.
+- **Blocked state** (plugin v3): a `permission.asked` or `form.created` on a
+  hosted session marks the pane **blocked** — reason from the permission's
+  `message`/`action` or the form's title. It is cleared only by an explicit
+  `permission.replied`, `form.replied`/`form.cancelled`, or a turn-ending
+  `session.execution.interrupted`/`.failed` — never by tool or streaming
+  activity (#189). Replays are deduped by request/form id.
+- **Next**: working/idle from `session.execution.*` using absolute
+  `report-agent --run-depth` values; tool labels stay out.
 - `WMUX_PLUGIN_DEBUG` works as it does for the server half, into
   `wmux-tui-plugin-debug.log`, and logs each distinct TUI event type once —
   the diagnostic that will pick the prompt-submission signal.

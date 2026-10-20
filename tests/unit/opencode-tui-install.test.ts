@@ -162,9 +162,9 @@ describe('the shipped entry file (#310)', () => {
   const coreSrc = fs.readFileSync(corePath, 'utf-8');
 
   it('carries a version marker, or installed copies never update', () => {
-    // v1 → v2 is #310 phase 2 (prompt capture): without the bump every installed
-    // TUI half keeps reporting session handles only.
-    expect(src).toMatch(/wmux-plugin-version:\s*2/);
+    // v2 → v3 is #310 phase 3a (blocked state): without the bump every installed
+    // TUI half keeps reporting session handles and prompts only.
+    expect(src).toMatch(/wmux-plugin-version:\s*3/);
   });
 
   it('is a v2 CLI plugin definition and the only export', () => {
@@ -175,6 +175,20 @@ describe('the shipped entry file (#310)', () => {
 
   it('subscribes to the v2 prompt-admission event', () => {
     expect(src).toContain('session.inbox.enqueued');
+  });
+
+  it('subscribes to every blocked-state event the reporter understands', () => {
+    for (const type of [
+      'permission.asked',
+      'permission.replied',
+      'form.created',
+      'form.replied',
+      'form.cancelled',
+      'session.execution.interrupted',
+      'session.execution.failed',
+    ]) {
+      expect(src).toContain(type);
+    }
   });
 
   it('delegates to the core by a relative import the installed layout resolves', () => {
