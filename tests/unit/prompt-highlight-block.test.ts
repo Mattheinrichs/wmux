@@ -10,6 +10,7 @@ import type { Terminal } from '@xterm/xterm';
 import {
   applyHighlight,
   buildNeedle,
+  cellColumnAt,
   forgetSurface,
   lineOf,
   locatePromptBlock,
@@ -196,7 +197,48 @@ describe('a live prompt can be refined to its echo above', () => {
   });
 });
 
-describe('the decoration is bounded to that block', () => {  it('paints from the prompt text, not from column zero', () => {
+describe('string offsets become terminal cells', () => {
+  function cellTerminal(cells: Array<{ chars: string; width: number }>) {
+    const term = {
+      buffer: {
+        active: {
+          getLine: () => ({
+            length: cells.length,
+            getCell: (col: number) => ({
+              getChars: () => cells[col]?.chars ?? '',
+              getWidth: () => cells[col]?.width ?? 1,
+            }),
+          }),
+        },
+      },
+    };
+    return term as unknown as Terminal;
+  }
+
+  it('accounts for a wide character before the prompt', () => {
+    // '界 x' is 3 code units but 4 cells: 界 takes two, then space, then x.
+    const cells = [
+      { chars: '界', width: 2 },
+      { chars: '', width: 0 },
+      { chars: ' ', width: 1 },
+      { chars: 'x', width: 1 },
+    ];
+    const term = cellTerminal(cells);
+    expect(cellColumnAt(term, 0, 2)).toBe(3);
+  });
+
+  it('includes both cells of a wide character at the end', () => {
+    const cells = [
+      { chars: '界', width: 2 },
+      { chars: '', width: 0 },
+    ];
+    const term = cellTerminal(cells);
+    expect(cellColumnAt(term, 0, 0, true)).toBe(1);
+  });
+});
+
+describe('the decoration is bounded to that block', () => {
+  it('paints from the prompt text, not from column zero', () => {
     const rows = [` session one │  ${PROMPT}`, ''];
     const { term, decorations } = fakeTerminal(rows);
     openMarkAt(term, SURFACE, 'e1', 0);

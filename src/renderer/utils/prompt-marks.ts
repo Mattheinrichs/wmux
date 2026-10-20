@@ -359,6 +359,8 @@ export interface PromptBlock {
   startCol: number;
   /** Rightmost raw column that carries any of the prompt's text, inclusive. */
   endCol: number;
+  /** Row that carries `endCol`; `startCol` is on `line`. */
+  endLine: number;
 }
 
 const promptPatterns = new Map<string, { chars: string; firstToken: string }>();
@@ -435,6 +437,7 @@ function consumeBlock(
   let ptr = 0;
   let start = -1;
   let end = -1;
+  let endLine = from;
 
   for (let offset = 0; offset < MAX_HIGHLIGHT_ROWS; offset++) {
     const raw = lineText(terminal, from + offset);
@@ -448,20 +451,23 @@ function consumeBlock(
       if (ptr === 0 && isBoxChar(ch) && chars[ptr] !== ch.toLowerCase()) { i++; continue; }
       if (ch.toLowerCase() !== chars[ptr]) return null;
       if (start < 0) start = i;
-      end = Math.max(end, i);
+      if (i >= end) {
+        end = i;
+        endLine = from + offset;
+      }
       ptr++;
       i++;
     }
 
     if (ptr === chars.length) {
-      return { line: from, rows: offset + 1, startCol: start, endCol: end };
+      return { line: from, rows: offset + 1, startCol: start, endCol: end, endLine };
     }
   }
 
   // A prompt longer than the band may cover is still a prompt: keep the block
   // it managed to verify, capped, rather than dropping the highlight entirely.
   if (ptr > 0 && start >= 0) {
-    return { line: from, rows: MAX_HIGHLIGHT_ROWS, startCol: start, endCol: end };
+    return { line: from, rows: MAX_HIGHLIGHT_ROWS, startCol: start, endCol: end, endLine };
   }
   return null;
 }
@@ -469,6 +475,46 @@ function consumeBlock(
 /** The vertical borders TUI layouts draw around their regions. */
 function isBoxChar(ch: string): boolean {
   return '│┃┆┇┊┋╎╏|║'.includes(ch);
+}
+
+/**
+ * Convert a string index into an xterm CELL column.
+ *
+ * `translateToString` speaks UTF-16 code units; a decoration's `x`/`width`
+ * speak terminal cells. They agree for ASCII and diverge for exactly the text
+ * most likely to sit in a sidebar title: CJK (one unit, two cells) and emoji
+ * (two units, two cells). Matching on the string and painting on the string's
+ * indices would move the band left of the prompt by the width of that title.
+ *
+ * `end` asks for the last cell of the glyph, so a wide character at the end is
+ * included rather than half-covered.
+ */
+export function cellColumnAt(
+  terminal: Terminal,
+  line: number,
+  index: number,
+  end = false,
+): number {
+  const bufferLine = terminal.buffer.active.getLine(line) as
+    | { length?: number; getCell?: (col: number) => { getChars?: () => string; getWidth?: () => number } | undefined }
+    | undefined;
+  if (!bufferLine || typeof bufferLine.getCell !== 'function') return index;
+
+  let offset = 0;
+  const length = bufferLine.length ?? 0;
+  for (let col = 0; col < length; col++) {
+    const cell = bufferLine.getCell(col);
+    if (!cell) continue;
+    const chars = cell.getChars?.() ?? '';
+    const width = Math.max(0, cell.getWidth?.() ?? 1);
+    // A wide glyph's trailing cell carries no code unit of its own.
+    const span = width === 0 ? 0 : Math.max(1, chars.length);
+    if (index < offset + span) {
+      return end ? col + Math.max(1, width) - 1 : col;
+    }
+    offset += span;
+  }
+  return index;
 }
 
 export interface HighlightOptions {
@@ -690,9 +736,13 @@ export function applyHighlight(
   // The rail lives in CSS, inset 4px from the decoration's left edge, so the
   // decoration starts one cell before the text. That keeps the rail in the
   // margin a TUI leaves there instead of covering the first glyph.
-  const x = block && onTheRow ? Math.max(0, block.startCol - 1) : 0;
+  const startCell = block && onTheRow ? cellColumnAt(terminal, block.line, block.startCol) : 0;
+  const endCell = block && onTheRow
+    ? cellColumnAt(terminal, block.endLine, block.endCol, true)
+    : terminal.cols - 1;
+  const x = Math.max(0, startCell - 1);
   const width = block && onTheRow
-    ? Math.max(1, Math.min(terminal.cols - x, block.endCol - x + 1))
+    ? Math.max(1, Math.min(terminal.cols - x, endCell - x + 1))
     : terminal.cols;
 
   try {
