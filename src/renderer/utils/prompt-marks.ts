@@ -386,10 +386,7 @@ function consumeBlock(
 
   for (let offset = 0; offset < MAX_HIGHLIGHT_ROWS; offset++) {
     const raw = lineText(terminal, from + offset);
-    if (!raw) {
-      if (ptr > 0) return null;
-      continue;
-    }
+    if (!raw) continue;
 
     let i = offset === 0 ? startCol : Math.max(0, startCol - 2);
     while (i < raw.length) {

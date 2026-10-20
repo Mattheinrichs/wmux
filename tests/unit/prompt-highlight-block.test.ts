@@ -115,6 +115,20 @@ describe('the prompt block is the prompt’s own text', () => {
     ));
   });
 
+  it('spans a blank row inside a multi-paragraph prompt', () => {
+    const rows = [
+      '│  first paragraph',
+      '',
+      '│  second paragraph',
+    ];
+    const { term } = fakeTerminal(rows);
+    const block = locatePromptBlock(term, 0, 'first paragraph\n\nsecond paragraph');
+
+    expect(block).not.toBeNull();
+    expect(block!.rows).toBe(3);
+    expect(block!.endCol).toBe(rows[2].lastIndexOf('paragraph') + 'paragraph'.length - 1);
+  });
+
   it('answers null when the rows do not carry the prompt', () => {
     const { term } = fakeTerminal(['│  something else entirely']);
     expect(locatePromptBlock(term, 0, PROMPT)).toBeNull();
