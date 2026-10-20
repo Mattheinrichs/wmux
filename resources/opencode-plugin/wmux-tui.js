@@ -1,11 +1,11 @@
-// wmux-plugin-version: 2
+// wmux-plugin-version: 3
 // wmux OpenCode CLI-side (TUI) plugin — the half that runs in the TUI process,
 // so a pane is attributable even when the server is remote or shared (#310).
 // Installed by `wmux opencode-tui` to <config>/plugins/wmux-cli/tui.js.
 // No-ops entirely outside wmux (WMUX !== '1').
 import { Plugin } from "@opencode/plugin/tui";
 import { createEffect, createRoot } from "solid-js";
-import { callWmux, createPromptReporter, createSessionReporter, isHostedSession, makeLogger, resolveDebugLog, resolveNodeRuntime, tabSessionIds } from "./core.js";
+import { callWmux, createBlockedReporter, createPromptReporter, createSessionReporter, eventSessionID, isHostedSession, makeLogger, resolveDebugLog, resolveNodeRuntime, tabSessionIds } from "./core.js";
 
 export default Plugin.define({
   id: "wmux.cli",
@@ -30,6 +30,7 @@ export default Plugin.define({
     const send = (argv) => callWmux(runtime, argv, log);
     const reporter = createSessionReporter({ surface, callWmux: send, log });
     const prompts = createPromptReporter({ callWmux: send, log });
+    const blockedState = createBlockedReporter({ surface, callWmux: send, log });
     let currentSession = null;
 
     // A viewed session is a store read, so the reporter follows navigation
@@ -90,8 +91,39 @@ export default Plugin.define({
       log("inbox: subscribe failed", (err && err.message) || String(err));
     }
 
+    // Blocked state (#310 phase 3a): the v2 forms and permissions that the
+    // server half reports as question/permission asks. Scoped to hosted
+    // sessions like prompts; tool and streaming events are deliberately absent
+    // — they are not "the human dealt with it" (#189).
+    const stopBlocked = [];
+    for (const type of [
+      "permission.asked",
+      "permission.replied",
+      "form.created",
+      "form.replied",
+      "form.cancelled",
+      "session.execution.interrupted",
+      "session.execution.failed",
+    ]) {
+      try {
+        if (ctx && ctx.data && typeof ctx.data.on === "function") {
+          const stop = ctx.data.on(type, (evt) => {
+            try {
+              const data = evt && evt.data;
+              blockedState.observe(type, data, hostedNow(eventSessionID(type, data)));
+            } catch (err) {
+              log(`blocked: ${type} threw`, (err && err.message) || String(err));
+            }
+          });
+          if (typeof stop === "function") stopBlocked.push(stop);
+        }
+      } catch (err) {
+        log(`blocked: ${type} subscribe failed`, (err && err.message) || String(err));
+      }
+    }
+
     // Distinct event types only, once each — the diagnostic that answered
-    // which event announces a prompt, kept for the blocked/activity phase.
+    // which event announces a prompt, kept for the activity phase.
     let stopEvents = () => {};
     try {
       if (ctx && ctx.data && typeof ctx.data.listen === "function") {
@@ -114,6 +146,7 @@ export default Plugin.define({
       released = true;
       reporter.dispose();
       try { stopInbox(); } catch {}
+      for (const stop of stopBlocked) { try { stop(); } catch {} }
       try { stopEvents(); } catch {}
       try { stopRoute(); } catch {}
     };
