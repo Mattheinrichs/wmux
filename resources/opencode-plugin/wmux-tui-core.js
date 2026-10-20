@@ -302,6 +302,9 @@ export function createPromptReporter({ callWmux: send, log = () => {} }) {
 /** The 200-char bound the server half's `askReason` applies to a block reason. */
 const MAX_REASON = 200;
 
+/** How many answered ask ids are remembered against a replay. */
+const MAX_ANSWERED = 200;
+
 /** Where a blocked-state event keeps its session id: forms nest it in `form`. */
 export function eventSessionID(type, data) {
   if (!data || typeof data !== "object") return null;
@@ -320,67 +323,90 @@ export function eventSessionID(type, data) {
  * a frame of the ask (#189), and a block that clears itself is worse than one
  * that lingers.
  *
- * One boolean, like the server half: overlapping asks are rare and the
- * declared state is `awaitingHuman`, not a count. Replays are deduped by the
- * request/form id so a repeated event cannot spam "Needs you".
+ * Every open ask is tracked by its id, with the session it belongs to, so:
+ * - two overlapping asks need two answers — the first reply does not clear a
+ *   "Needs you" the second one still deserves;
+ * - a reply to an ask this pane raised counts even when its session is no
+ *   longer the one on screen (the user switched tabs to answer elsewhere);
+ * - a replayed ask is one "Needs you", and a replay of one already answered is
+ *   none.
+ * An ask with no id is cleared by any reply of its kind, so it cannot strand
+ * the pane. A turn that ends interrupted or failed clears its session's asks.
  */
 export function createBlockedReporter({ surface, callWmux: send, log = () => {} }) {
-  const permissions = new Set();
-  const forms = new Set();
+  /** `per:<id>` / `frm:<id>` → the session it was asked in (or null). */
+  const pending = new Map();
+  /** Ids already answered, so a replayed ask cannot raise "Needs you" again. */
+  const answered = new Set();
   let blocked = false;
 
-  const block = (reason, fallback) => {
-    const text = (typeof reason === "string" && reason.trim()) || fallback;
-    if (!text) return;
-    blocked = true;
-    const capped = text.slice(0, MAX_REASON);
-    log("blocked", { chars: capped.length });
-    send(["report-agent", "--surface", surface, "--blocked", capped]);
+  const keyOf = (kind, id) => (typeof id === "string" && id ? `${kind}:${id}` : `${kind}:?`);
+  const remember = (key) => {
+    answered.add(key);
+    if (answered.size > MAX_ANSWERED) answered.delete(answered.values().next().value);
   };
-  const unblock = () => {
-    if (!blocked) return;
+
+  const ask = (key, sessionID, reason, fallback) => {
+    if (pending.has(key) || answered.has(key)) return;
+    pending.set(key, sessionID);
+    const text = ((typeof reason === "string" && reason.trim()) || fallback).slice(0, MAX_REASON);
+    blocked = true;
+    log("blocked", { chars: text.length });
+    send(["report-agent", "--surface", surface, "--blocked", text]);
+  };
+  const settle = () => {
+    if (!blocked || pending.size > 0) return;
     blocked = false;
-    permissions.clear();
-    forms.clear();
     log("unblocked");
     send(["report-agent", "--surface", surface, "--unblocked"]);
+  };
+  const reply = (kind, id, hosted) => {
+    const key = keyOf(kind, id);
+    if (pending.has(key)) {
+      pending.delete(key);
+      if (!key.endsWith(":?")) remember(key);
+    } else if (hosted) {
+      // An answer to an ask we never identified: release the anonymous one.
+      pending.delete(`${kind}:?`);
+    } else {
+      return;
+    }
+    settle();
+  };
+  const endTurn = (sessionID, hosted) => {
+    let touched = false;
+    for (const [key, owner] of pending) {
+      if (owner === sessionID || (hosted && owner === null)) {
+        pending.delete(key);
+        touched = true;
+      }
+    }
+    if (touched || hosted) settle();
   };
 
   return {
     observe(type, data, hosted) {
-      if (!hosted || !data || typeof data !== "object") return;
+      if (!data || typeof data !== "object") return;
+      const sessionID = eventSessionID(type, data);
       switch (type) {
-        case "permission.asked": {
-          const id = typeof data.id === "string" && data.id ? data.id : null;
-          if (id) {
-            if (permissions.has(id)) return;
-            permissions.add(id);
-          }
-          block(data.message, data.action || "Permission requested");
+        case "permission.asked":
+          if (hosted) ask(keyOf("per", data.id), sessionID, data.message, data.action || "Permission requested");
           return;
-        }
         case "form.created": {
           const form = data.form && typeof data.form === "object" ? data.form : {};
-          const id = typeof form.id === "string" && form.id ? form.id : null;
-          if (id) {
-            if (forms.has(id)) return;
-            forms.add(id);
-          }
-          block(form.title, "Input requested");
+          if (hosted) ask(keyOf("frm", form.id), sessionID, form.title, "Input requested");
           return;
         }
         case "permission.replied":
-          if (typeof data.requestID === "string") permissions.delete(data.requestID);
-          unblock();
+          reply("per", data.requestID, hosted);
           return;
         case "form.replied":
         case "form.cancelled":
-          if (typeof data.id === "string") forms.delete(data.id);
-          unblock();
+          reply("frm", data.id, hosted);
           return;
         case "session.execution.interrupted":
         case "session.execution.failed":
-          unblock();
+          endTurn(sessionID, hosted);
           return;
         default:
           return;

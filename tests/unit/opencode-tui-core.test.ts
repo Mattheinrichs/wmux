@@ -277,6 +277,41 @@ describe('blocked state (#310 phase 3a)', () => {
     expect(sent).toEqual([]);
   });
 
+  it('needs every overlapping ask answered before it unblocks', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('form.created', { form: { id: 'frm_1', sessionID: 'ses_abc12345', title: 'Q' } }, true);
+    reporter.observe('permission.replied', { requestID: 'per_1' }, true);
+    expect(sent.map((argv: string[]) => argv[3])).toEqual(['--blocked', '--blocked']);
+    reporter.observe('form.replied', { id: 'frm_1' }, true);
+    expect(sent.at(-1)?.[3]).toBe('--unblocked');
+  });
+
+  it('takes the reply to its own ask after the session left the screen', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('permission.replied', { requestID: 'per_1' }, false);
+    expect(sent.at(-1)?.[3]).toBe('--unblocked');
+  });
+
+  it('does not raise "Needs you" again for a replay of an answered ask', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('permission.replied', { requestID: 'per_1' }, true);
+    reporter.observe('permission.asked', asked(), true);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('clears only the failed session\'s asks', async () => {
+    const { reporter, sent } = await reporterFor();
+    reporter.observe('permission.asked', asked(), true);
+    reporter.observe('permission.asked', asked({ id: 'per_2', sessionID: 'ses_other999' }), true);
+    reporter.observe('session.execution.failed', { sessionID: 'ses_abc12345' }, true);
+    expect(sent.at(-1)?.[3]).toBe('--blocked');
+    reporter.observe('session.execution.interrupted', { sessionID: 'ses_other999' }, false);
+    expect(sent.at(-1)?.[3]).toBe('--unblocked');
+  });
+
   it('caps the reason at 200 chars, the same bound the server half applies', async () => {
     const { reporter, sent } = await reporterFor();
     reporter.observe('permission.asked', asked({ message: 'x'.repeat(500) }), true);

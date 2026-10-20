@@ -113,7 +113,10 @@ wmux opencode-tui --remove   # remove, only when the file carries our marker
   `message`/`action` or the form's title. It is cleared only by an explicit
   `permission.replied`, `form.replied`/`form.cancelled`, or a turn-ending
   `session.execution.interrupted`/`.failed` — never by tool or streaming
-  activity (#189). Replays are deduped by request/form id.
+  activity (#189). Each open ask is tracked by its id: overlapping asks need
+  every one answered, a reply to an ask the pane raised counts even after its
+  session left the screen, a turn failure clears only that session's asks,
+  and a replay of an ask — answered or not — never raises "Needs you" twice.
 - **Next**: working/idle from `session.execution.*` using absolute
   `report-agent --run-depth` values; tool labels stay out.
 - `WMUX_PLUGIN_DEBUG` works as it does for the server half, into
