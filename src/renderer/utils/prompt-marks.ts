@@ -35,6 +35,13 @@ interface MarkRecord {
   decorations: IDecoration[];
   /** A re-validation is already queued; see `applyHighlight`'s `onRender`. */
   revalidating?: boolean;
+  /**
+   * First-row probe for re-validation. `onRender` runs for every visible
+   * decoration on every viewport render; re-scanning a whole prompt block there
+   * would turn each PTY frame into up to 200 full-buffer scans (issue #141).
+   * One row slice answers the same question the old single-row needle did.
+   */
+  blockCheck?: { start: number; text: string };
 }
 
 /** surfaceId → entryId → mark. */
@@ -653,6 +660,13 @@ export function applyHighlight(
   // Nothing left to draw: no band, and no tick asked for.
   if (!onTheRow && !options.ruler) return { tinted: false, settled };
 
+  record.blockCheck = block && onTheRow
+    ? {
+      start: block.startCol,
+      text: lineText(terminal, record.marker.line).slice(block.startCol, block.startCol + 24),
+    }
+    : undefined;
+
   // The rail lives in CSS, inset 4px from the decoration's left edge, so the
   // decoration starts one cell before the text. That keeps the rail in the
   // margin a TUI leaves there instead of covering the first glyph.
@@ -688,7 +702,9 @@ export function applyHighlight(
         // Nothing to re-check when the tint rests on the caller's word rather
         // than on the row's text.
         if (options.text) {
-          if (locatePromptBlock(terminal, record.marker.line, options.text)) return;
+          const check = record.blockCheck;
+          const row = lineText(terminal, record.marker.line);
+          if (check && check.text && row.slice(check.start, check.start + check.text.length) === check.text) return;
         } else {
           if (!needle || found === null) return;
           const row = record.marker.line + found;

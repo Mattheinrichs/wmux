@@ -5,7 +5,7 @@
 // transcript, so a full-width decoration paints through it (and a band sized by
 // the terminal's width undercounts a wrapped prompt in the narrower chat
 // column). These tests model that grid directly.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Terminal } from '@xterm/xterm';
 import {
   applyHighlight,
@@ -20,12 +20,14 @@ import {
 interface FakeDecoration {
   options: Record<string, unknown>;
   disposed: boolean;
+  render(): void;
   onRender(cb: (el: HTMLElement) => void): void;
   dispose(): void;
 }
 
 function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
   const decorations: FakeDecoration[] = [];
+  const reads = { count: 0 };
   const state = { baseY: 0, cursorY: cursorLine };
   const term = {
     rows: 24,
@@ -36,9 +38,12 @@ function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
         get baseY() { return state.baseY; },
         get cursorY() { return state.cursorY; },
         get cursorX() { return 0; },
-        getLine: (y: number) => (rows[y] === undefined
-          ? undefined
-          : { translateToString: () => rows[y] }),
+        getLine: (y: number) => {
+          reads.count++;
+          return rows[y] === undefined
+            ? undefined
+            : { translateToString: () => rows[y] };
+        },
       },
     },
     registerMarker(offset: number) {
@@ -49,17 +54,19 @@ function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
       };
     },
     registerDecoration(options: Record<string, unknown>): FakeDecoration {
+      const callbacks: ((el: HTMLElement) => void)[] = [];
       const decoration: FakeDecoration = {
         options,
         disposed: false,
-        onRender() {},
+        render() { for (const cb of callbacks) cb(document.createElement('div')); },
+        onRender(cb) { callbacks.push(cb); },
         dispose() { this.disposed = true; },
       };
       decorations.push(decoration);
       return decoration;
     },
   };
-  return { term: term as unknown as Terminal, decorations, rows };
+  return { term: term as unknown as Terminal, decorations, reads, rows };
 }
 
 const SURFACE = 'surf-block';
@@ -70,6 +77,7 @@ function latest(decorations: FakeDecoration[]): FakeDecoration | undefined {
 }
 
 beforeEach(() => forgetSurface(SURFACE));
+afterEach(() => vi.useRealTimers());
 
 describe('the prompt block is the prompt’s own text', () => {
   it('starts after a left sidebar and spans both hard lines', () => {
@@ -203,6 +211,58 @@ describe('the decoration is bounded to that block', () => {  it('paints from the
     });
 
     expect(latest(decorations)?.options.height).toBe(2);
+  });
+
+  it('drops the band when the first row stops carrying the prompt', () => {
+    vi.useFakeTimers();
+    const rows = [
+      '│  first line of the prompt',
+      '│  second line of the prompt',
+      '',
+    ];
+    const { term, decorations } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 2,
+      ruler: true,
+      needle: buildNeedle('first line of the prompt'),
+      confirmed: false,
+      text: 'first line of the prompt\nsecond line of the prompt',
+    });
+    const first = latest(decorations)!;
+    expect(first.options.backgroundColor).toBeTruthy();
+
+    rows[0] = '│  something else entirely';
+    first.render();
+    vi.runAllTimers();
+
+    expect(first.disposed).toBe(true);
+    expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
+    expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
+  });
+
+  it('revalidates a rendered band from one row, not by rescanning the block', () => {
+    const text = 'first line of the prompt\nsecond line of the prompt';
+    const rows = [
+      '│  first line of the prompt',
+      '│  second line of the prompt',
+      '',
+    ];
+    const { term, decorations, reads } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 2,
+      ruler: true,
+      needle: buildNeedle(text),
+      confirmed: false,
+      text,
+    });
+
+    reads.count = 0;
+    latest(decorations)!.render();
+    expect(reads.count).toBe(1);
   });
 
   it('withholds the tint while the block is still the live input row', () => {
