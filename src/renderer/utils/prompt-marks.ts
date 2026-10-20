@@ -230,8 +230,54 @@ export function refineMark(
   }
   if (best === null || best === origin) return origin;
 
-  const moved = markerAt(terminal, best);
-  if (!moved) return origin;
+  return moveMark(terminal, surfaceId, entryId, record, best) ?? origin;
+}
+
+/**
+ * Move a mark to the nearest row carrying the prompt strictly ABOVE `before`.
+ *
+ * The submit-time cursor is inside the agent's live input region, and the composer
+ * still shows the prompt when the hook arrives, so a plain nearest-match search
+ * resolves to the composer. This search excludes it: only rows above the live
+ * line can be the echo, and "closest above" is the one that belongs to this
+ * submission rather than an older identical prompt.
+ *
+ * Returns the new line, or null when the echo is not there yet — the caller
+ * retries while the TUI paints it.
+ */
+export function refineMarkAbove(
+  terminal: Terminal,
+  surfaceId: string,
+  entryId: string,
+  text: string,
+  before: number,
+): number | null {
+  const record = marks.get(surfaceId)?.get(entryId);
+  if (!record || record.marker.line < 0) return null;
+
+  const needle = buildNeedle(text);
+  if (!needle) return null;
+
+  const buf = terminal.buffer.active;
+  const lowest = Math.max(0, before - REFINE_BACK_ROWS);
+  const highest = Math.min(before - 1, buf.baseY + terminal.rows - 1);
+  for (let line = highest; line >= lowest; line--) {
+    if (needleRow(terminal, line, 1, needle) === null) continue;
+    return moveMark(terminal, surfaceId, entryId, record, line);
+  }
+  return null;
+}
+
+/** Re-anchor a record's marker and drop the decorations bound to the old row. */
+function moveMark(
+  terminal: Terminal,
+  surfaceId: string,
+  entryId: string,
+  record: MarkRecord,
+  line: number,
+): number | null {
+  const moved = markerAt(terminal, line);
+  if (!moved) return null;
   for (const decoration of record.decorations) decoration.dispose();
   record.marker.dispose();
   marks.get(surfaceId)?.set(entryId, { marker: moved, decorations: [] });

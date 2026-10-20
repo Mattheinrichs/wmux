@@ -11,8 +11,10 @@ import {
   applyHighlight,
   buildNeedle,
   forgetSurface,
+  lineOf,
   locatePromptBlock,
   openMarkAt,
+  refineMarkAbove,
 } from '../../src/renderer/utils/prompt-marks';
 
 interface FakeDecoration {
@@ -116,8 +118,36 @@ describe('the prompt block is the prompt’s own text', () => {
   });
 });
 
-describe('the decoration is bounded to that block', () => {
-  it('paints from the prompt text, not from column zero', () => {
+describe('a live prompt can be refined to its echo above', () => {
+  it('moves the mark to the nearest echo above the input row', () => {
+    const rows = [
+      '│  fix the flaky pty-manager test',
+      '  running…',
+      `> ${PROMPT}`,
+    ];
+    const { term } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 2);
+    expect(refineMarkAbove(term, SURFACE, 'e1', PROMPT, 2)).toBe(0);
+    expect(lineOf(SURFACE, 'e1')).toBe(0);
+  });
+
+  it('never moves onto the live row or below it', () => {
+    const rows = ['other', `> ${PROMPT}`, 'more'];
+    const { term } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 1);
+    expect(refineMarkAbove(term, SURFACE, 'e1', PROMPT, 1)).toBeNull();
+    expect(lineOf(SURFACE, 'e1')).toBe(1);
+  });
+
+  it('answers null when no echo is above yet', () => {
+    const rows = ['other', 'more', '> '];
+    const { term } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 2);
+    expect(refineMarkAbove(term, SURFACE, 'e1', PROMPT, 2)).toBeNull();
+  });
+});
+
+describe('the decoration is bounded to that block', () => {  it('paints from the prompt text, not from column zero', () => {
     const rows = [` session one │  ${PROMPT}`];
     const { term, decorations } = fakeTerminal(rows);
     openMarkAt(term, SURFACE, 'e1', 0);
