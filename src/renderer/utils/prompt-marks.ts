@@ -608,7 +608,7 @@ export function applyHighlight(
     ? needleRow(terminal, record.marker.line, height, needle)
     : null;
   const onTheRow = options.text
-    ? block !== null && !deferred
+    ? block !== null && !deferred && (needle !== null || options.confirmed !== false)
     : (needle ? found !== null : options.confirmed !== false);
   const tint = onTheRow ? blendOverBackground(options.color, backgroundOf(terminal)) : null;
   // Nothing left to draw: no band, and no tick asked for.

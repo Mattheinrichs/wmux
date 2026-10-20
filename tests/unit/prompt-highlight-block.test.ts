@@ -254,4 +254,20 @@ describe('the decoration is bounded to that block', () => {  it('paints from the
     expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
     expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
   });
+
+  it('still withholds a short agent prompt even when the block matches', () => {
+    const { term, decorations } = fakeTerminal(['│  yes']);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 1,
+      ruler: true,
+      needle: buildNeedle('yes'),
+      confirmed: false,
+      text: 'yes',
+    });
+
+    expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
+    expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
+  });
 });
