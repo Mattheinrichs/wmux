@@ -361,6 +361,25 @@ export interface PromptBlock {
   endCol: number;
 }
 
+const promptPatterns = new Map<string, { chars: string; firstToken: string }>();
+const MAX_PROMPT_PATTERNS = 256;
+
+function patternFor(text: string): { chars: string; firstToken: string } {
+  const cached = promptPatterns.get(text);
+  if (cached) return cached;
+  const expected = normalizeForMatch(text);
+  const pattern = {
+    chars: expected.replace(/ /g, ''),
+    firstToken: expected.split(' ')[0] ?? '',
+  };
+  if (promptPatterns.size >= MAX_PROMPT_PATTERNS) {
+    const oldest = promptPatterns.keys().next().value;
+    if (oldest !== undefined) promptPatterns.delete(oldest);
+  }
+  promptPatterns.set(text, pattern);
+  return pattern;
+}
+
 /**
  * Where a prompt's own text sits in the buffer (issue #230 follow-up).
  *
@@ -384,12 +403,8 @@ export function locatePromptBlock(
   from: number,
   text: string,
 ): PromptBlock | null {
-  const expected = normalizeForMatch(text);
-  const chars = expected.replace(/ /g, '');
-  if (!chars) return null;
-
-  const firstToken = expected.split(' ')[0];
-  if (!firstToken) return null;
+  const { chars, firstToken } = patternFor(text);
+  if (!chars || !firstToken) return null;
 
   const row = lineText(terminal, from);
   const lower = row.toLowerCase();
