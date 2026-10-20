@@ -161,7 +161,11 @@ function applyViews(terminal: Terminal, entry: PromptEntry): boolean {
   // is not the problem issue #207 describes, and holding `npm run build` back
   // from streaming would read as a freeze rather than as a feature.
   const inScope = prefs.anchorScope === 'all' || entry.source === 'agent';
-  if (prefs.anchor && inScope && settled && entry.line !== null) {
+  // Only the newest prompt may own the anchor. A retry for an older prompt can
+  // settle seconds after the user has asked the next question; letting it
+  // re-anchor would yank the view back to the previous turn.
+  const latest = useStore.getState().prompts[entry.surfaceId]?.at(-1)?.id === entry.id;
+  if (prefs.anchor && inScope && settled && latest && entry.line !== null) {
     anchor.anchorAt(terminal, entry.surfaceId, marks.lineResolver(entry.surfaceId, entry.id));
   }
   return settled;
