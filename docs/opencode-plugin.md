@@ -64,6 +64,48 @@ event.
 
 ---
 
+## The CLI-side (TUI) half
+
+The plugin above runs in OpenCode's **server** process. When the TUI is a
+client of a **remote server**, or of v2's shared `opencode serve --service` for
+another pane, that process has no pane's environment and none of its reports
+can be attributed — the docs above record that limit for the session handle.
+
+Since the CLI-side (TUI) half exists it covers those setups: it runs in the
+TUI process, against a remote server, with the pane's `WMUX_*` environment.
+
+Install it from the pane that will host the TUI:
+
+```bash
+wmux opencode-tui            # install or update, into <config>/plugins/wmux-cli/
+wmux opencode-tui --remove   # remove, only when the file carries our marker
+```
+
+- It writes `tui.js` and `core.js` to `<config>/plugins/wmux-cli/` — the
+  directory form OpenCode's CLI resolves without a `package.json`. `<config>`
+  is `$XDG_CONFIG_HOME/opencode` when that variable is absolute, else
+  `~/.config/opencode`, resolved **in the environment the command runs in**.
+  In a WSL pane that is the distro's home; in a devcontainer, the container's.
+  Nothing on the Windows side writes into a WSL home.
+- It is not installed automatically and does not need a wmux restart. Re-run
+  the command after upgrading wmux: it compares the `// wmux-plugin-version:`
+  marker on `tui.js` and rewrites both files when the shipped version differs.
+- **What it reports today** (issue #310 phase 1): the viewed session handle —
+  `wmux report-session <id> --provider opencode` — so *Resume OpenCode sessions
+  on restore* works for remote/shared setups. The viewed tab is followed
+  reactively; a viewed subagent resolves to its root; quitting the TUI releases
+  the handle.
+- **Next**: the prompt log and blocked/activity state from the same half.
+  Until then those stay server-half features.
+- `WMUX_PLUGIN_DEBUG` works as it does for the server half, into
+  `wmux-tui-plugin-debug.log`, and logs each distinct TUI event type once —
+  the diagnostic that will pick the prompt-submission signal.
+- WSL needs the same prerequisites as any wmux CLI call from inside the
+  distro: `WMUX_*` arrives via `WSLENV`, and the named pipe is reached through
+  `npiperelay.exe` automatically (`docs/DEVCONTAINER.md`).
+
+---
+
 ## Debugging it
 
 Set `WMUX_PLUGIN_DEBUG` before launching OpenCode:
