@@ -332,7 +332,10 @@ describe('working/idle (#310 phase 3b)', () => {
   const reporterFor = async () => {
     const { createActivityReporter } = await load();
     const sent: string[][] = [];
-    const reporter = createActivityReporter({ surface: SURFACE, callWmux: (argv: string[]) => sent.push(argv) });
+    const reporter = createActivityReporter({
+      surface: SURFACE,
+      callWmux: (argv: string[], done?: () => void) => { sent.push(argv); done?.(); },
+    });
     return { reporter, sent };
   };
   const ev = (sessionID: string, over: any = {}) => ({ sessionID, ...over });
@@ -410,6 +413,40 @@ describe('working/idle (#310 phase 3b)', () => {
     reporter.observe('session.execution.started', null, true);
     expect(sent).toEqual([]);
   });
+
+  // Each report is its own CLI process; two spawned ms apart race to the pipe,
+  // and a `0` landing before its `1` reads "working" for 15 minutes (#151).
+  it('never has two reports in flight — the next waits for the previous call', async () => {
+    const { createActivityReporter } = await load();
+    const sent: string[][] = [];
+    const pending: Array<() => void> = [];
+    const reporter = createActivityReporter({
+      surface: SURFACE,
+      callWmux: (argv: string[], done: () => void) => { sent.push(argv); pending.push(done); },
+    });
+    reporter.observe('session.execution.started', ev('ses_abc12345'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_abc12345'), true);
+    expect(depths(sent)).toEqual(['1']);
+    pending.shift()!();
+    expect(depths(sent)).toEqual(['1', '0']);
+  });
+
+  it('collapses changes made while a call is in flight into the latest depth', async () => {
+    const { createActivityReporter } = await load();
+    const sent: string[][] = [];
+    const pending: Array<() => void> = [];
+    const reporter = createActivityReporter({
+      surface: SURFACE,
+      callWmux: (argv: string[], done: () => void) => { sent.push(argv); pending.push(done); },
+    });
+    reporter.observe('session.execution.started', ev('ses_a1234567'), true);
+    reporter.observe('session.execution.succeeded', ev('ses_a1234567'), true);
+    reporter.observe('session.execution.started', ev('ses_b1234567'), true);
+    pending.shift()!();
+    // Back at working before the first call returned: nothing more to say.
+    expect(depths(sent)).toEqual(['1']);
+    expect(pending).toEqual([]);
+  });
 });
 
 describe('callWmux (#310)', () => {
@@ -436,6 +473,14 @@ describe('callWmux (#310)', () => {
     const { callWmux } = await load();
     callWmux(runtimeNode, ['x'], () => {}, {}, 'win32');
     expect(calls).toEqual([]);
+  });
+
+  it('reports completion on every path, the skip included', async () => {
+    const { callWmux } = await load();
+    const done = vi.fn();
+    callWmux(runtimeNode, ['x'], () => {}, { WMUX_CLI: 'wmux.js' }, 'linux', done);
+    callWmux(runtimeNode, ['x'], () => {}, {}, 'win32', done);
+    expect(done).toHaveBeenCalledTimes(2);
   });
 
   it('falls back to `wmux` on PATH elsewhere', async () => {

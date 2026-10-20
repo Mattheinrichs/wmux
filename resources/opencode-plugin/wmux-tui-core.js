@@ -137,7 +137,15 @@ export function makeLogger(file) {
  * shell is involved unless the PATH fallback names `wmux`, which on Windows is
  * why the .cmd shim is refused (#154/#187).
  */
-export function callWmux(runtime, argv, log = () => {}, env = process.env, platform = process.platform) {
+export function callWmux(runtime, argv, log = () => {}, env = process.env, platform = process.platform, done = () => {}) {
+  // `done` fires exactly once, on every path, when this call can no longer
+  // reach the pipe — which is what lets a reporter order its own calls.
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    try { done(); } catch {}
+  };
   try {
     const cli = env.WMUX_CLI;
     const opts = { windowsHide: true };
@@ -153,6 +161,7 @@ export function callWmux(runtime, argv, log = () => {}, env = process.env, platf
       // The PATH shim is `wmux.cmd`, which execFile cannot spawn without a
       // shell. Nothing to do — WMUX_CLI is always set alongside WMUX=1.
       log("cli: skipped (no WMUX_CLI on win32)", argv);
+      finish();
       return;
     } else {
       file = "wmux";
@@ -165,9 +174,11 @@ export function callWmux(runtime, argv, log = () => {}, env = process.env, platf
       } else {
         log(`cli: ${argv[0]} ok`);
       }
+      finish();
     });
   } catch (err) {
     log("cli: threw", (err && err.message) || String(err));
+    finish();
   }
 }
 
@@ -428,16 +439,42 @@ export function createBlockedReporter({ surface, callWmux: send, log = () => {} 
  * blocked reporter: the pane owns what it reported. An end clears its id even
  * when the view has moved — hosting only gates the start — and a subagent's end
  * cannot return the pane to idle while its parent is still running.
+ *
+ * Reports go out ONE AT A TIME. Each is its own CLI process, and two processes
+ * spawned a few ms apart race to the pipe: a short turn's `--run-depth 0` could
+ * land before its `1` and leave the pane "working" for the whole trust window —
+ * the #151 race. The next report waits for the previous call to finish, and
+ * whatever changed meanwhile collapses into the latest wanted depth.
  */
 export function createActivityReporter({ surface, callWmux: send, log = () => {} }) {
   const running = new Set();
-  let reported = null;
+  let wanted = null;
+  let sent = null;
+  let inFlight = false;
+
+  const flush = () => {
+    if (inFlight || wanted === sent) return;
+    const depth = wanted;
+    sent = depth;
+    inFlight = true;
+    log(depth ? "working" : "idle");
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      inFlight = false;
+      flush();
+    };
+    try {
+      send(["report-agent", "--surface", surface, "--run-depth", depth ? "1" : "0"], finish);
+    } catch {
+      finish();
+    }
+  };
 
   const report = (depth) => {
-    if (reported === depth) return;
-    reported = depth;
-    log(depth ? "working" : "idle");
-    send(["report-agent", "--surface", surface, "--run-depth", depth ? "1" : "0"]);
+    wanted = depth;
+    flush();
   };
 
   return {

@@ -27,7 +27,7 @@ export default Plugin.define({
       pid: process.pid,
     });
 
-    const send = (argv) => callWmux(runtime, argv, log);
+    const send = (argv, done) => callWmux(runtime, argv, log, process.env, process.platform, done);
     const reporter = createSessionReporter({ surface, callWmux: send, log });
     const prompts = createPromptReporter({ callWmux: send, log });
     const blockedState = createBlockedReporter({ surface, callWmux: send, log });
