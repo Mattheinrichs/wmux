@@ -354,6 +354,22 @@ export default function WorkspaceSettings() {
       </p>
 
       <div className="settings-row">
+        <label className="settings-label">{t('settings.workspacePanel.explorerOpenByDefault', 'Show the file explorer by default')}</label>
+        <input
+          type="checkbox"
+          className="settings-toggle"
+          checked={workspacePrefs.explorerOpenByDefault}
+          onChange={(e) => setWorkspacePrefs({ explorerOpenByDefault: e.target.checked })}
+        />
+      </div>
+      <p className="settings-hint">
+        {t(
+          'settings.workspacePanel.explorerOpenByDefaultHint',
+          'Opens the file explorer on the right of every workspace, with live +/- line counts per file and the files your agent is editing. Works in any folder: a git repo is compared to its last commit, any other folder to how it looked when the panel opened. Closing it hides it until you switch workspace; turn this off to hide it everywhere.',
+        )}
+      </p>
+
+      <div className="settings-row">
         <label className="settings-label">{t('settings.workspacePanel.autoOpenDiff', 'Auto-open diff tab on agent edits')}</label>
         <input
           type="checkbox"

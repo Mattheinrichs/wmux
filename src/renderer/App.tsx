@@ -1219,10 +1219,14 @@ export default function App() {
   // The store write is deliberately OUTSIDE the setState updater: an updater
   // must be pure, and StrictMode double-invokes it — which made one toggle
   // write the workspace twice.
+  //
+  // Under `explorerOpenByDefault` nothing is persisted: the pref already says
+  // "open", and writing `explorerOpen: false` would re-fire the restore effect
+  // below and reopen the panel the same frame it was closed.
   const handleToggleExplorer = useCallback((next?: boolean) => {
     const value = next ?? !explorerOpen;
     setExplorerOpen(value);
-    if (activeWorkspaceId) {
+    if (activeWorkspaceId && !useStore.getState().workspacePrefs.explorerOpenByDefault) {
       updateWorkspaceMetadata(activeWorkspaceId, { explorerOpen: value });
     }
   }, [explorerOpen, activeWorkspaceId, updateWorkspaceMetadata]);
@@ -1232,9 +1236,16 @@ export default function App() {
   // commit from) the workspace object landing in `workspaces`, so an id-only
   // dep would sample `undefined` once and never re-fire since the id didn't
   // change again.
+  //
+  // With `explorerOpenByDefault` on, EVERY workspace shows the explorer —
+  // including one whose panel was closed in an earlier session: the pref is the
+  // answer, not the remembered toggle. Closing it hides it until the next
+  // workspace switch; turning the pref off is how it goes away everywhere, and
+  // then each workspace's own remembered state applies as before.
+  const explorerOpenByDefault = useStore((s) => s.workspacePrefs.explorerOpenByDefault);
   useEffect(() => {
-    setExplorerOpen(!!activeWorkspace?.explorerOpen);
-  }, [activeWorkspaceId, activeWorkspace?.explorerOpen]);
+    setExplorerOpen(explorerOpenByDefault || !!activeWorkspace?.explorerOpen);
+  }, [activeWorkspaceId, activeWorkspace?.explorerOpen, explorerOpenByDefault]);
 
   useEffect(() => {
     if (!activeWorkspace) return;

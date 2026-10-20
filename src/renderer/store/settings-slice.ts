@@ -461,6 +461,13 @@ export interface WorkspacePrefs {
    */
   autoOpenDiffTab: boolean;
   /**
+   * Whether a workspace shows the file explorer (live +N/-N per file, the files
+   * an agent is touching). On, EVERY workspace shows it, whatever an earlier
+   * toggle stored; off, each workspace's remembered state applies. On by
+   * default: it is what makes a pane of agents read like an IDE.
+   */
+  explorerOpenByDefault: boolean;
+  /**
    * Ask before closing a session (issue #90): an accidental × click or
    * Ctrl+Shift+W kills every PTY in the workspace, including agents that
    * haven't persisted their state yet. Opt-in — off by default so the
@@ -575,6 +582,7 @@ export const DEFAULT_WORKSPACE_PREFS: WorkspacePrefs = {
   defaultCwd: '',
   showWelcomeScreen: true,
   autoOpenDiffTab: true,
+  explorerOpenByDefault: true,
   confirmWorkspaceClose: false,
   confirmAppClose: false,
   defaultLayoutId: null,

@@ -483,6 +483,8 @@ export const fr: Translation = {
   'settings.workspacePanel.restoreCodexSessionsHint': "Rouvre la conversation Codex exacte dans chaque onglet restauré. Active cette option, puis lance codex dans un nouveau terminal wmux. Nécessite Node.js et le CLI Codex Windows natif dans PowerShell ou l’invite de commandes. Une session quittée normalement ne sera pas relancée.",
   'settings.workspacePanel.restoreClaudeSessions': 'Reprendre les sessions Claude Code à la restauration',
   'settings.workspacePanel.restoreClaudeSessionsHint': "Quand wmux restaure une session, relance chaque terminal qui exécutait Claude Code avec `claude --resume`, dans le répertoire où il se trouvait. Désactivé par défaut : chacun de ces panneaux démarre un agent d'un coup. Les panneaux dont Claude n'a plus la conversation sont ignorés, et un Claude que vous avez quitté proprement n'est pas repris.",
+  'settings.workspacePanel.explorerOpenByDefault': "Afficher l'explorateur de fichiers par défaut",
+  'settings.workspacePanel.explorerOpenByDefaultHint': "Ouvre l'explorateur de fichiers à droite de chaque espace de travail, avec le nombre de lignes +/- par fichier en direct et les fichiers que votre agent modifie. Fonctionne dans n'importe quel dossier : un dépôt git est comparé à son dernier commit, tout autre dossier à son état à l'ouverture du panneau. Le fermer le masque jusqu'au prochain changement d'espace ; désactivez cette option pour le masquer partout.",
   'settings.workspacePanel.autoOpenDiff': "Ouvrir automatiquement l'onglet diff lors des modifications d'agent",
   'settings.workspacePanel.autoOpenDiffHint':
     "Quand un agent modifie ou écrit des fichiers, wmux ouvre un onglet diff dans le panneau du bas. Désactivez pour qu'il n'apparaisse plus.",
