@@ -21,7 +21,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
  *   - UserPromptSubmit       → extracts `prompt` (the prompt log, issue #207)
  * WMUX_SURFACE_ID (set by wmux in each pane's shell) ties the event to its pane.
  */
+const fs_1 = __importDefault(require("fs"));
 const net_1 = __importDefault(require("net"));
+const path_1 = __importDefault(require("path"));
 const transport_deadline_1 = require("./transport-deadline");
 const argv = process.argv.slice(2);
 let tool = '';
@@ -259,6 +261,92 @@ function taskDetail(toolInput) {
     const raw = typeof toolInput?.description === 'string' ? toolInput.description : '';
     return raw.replace(/\s+/g, ' ').trim().slice(0, MAX_TASK_DETAIL);
 }
+/**
+ * How much of a subagent's transcript is read for notifications. The tail is
+ * enough: this runs on every tool call the subagent makes, and a notification
+ * is absorbed just before the call that follows it.
+ */
+const SUBAGENT_TAIL_BYTES = 256 * 1024;
+/**
+ * Where a subagent's own transcript is. `SubagentStop` names it
+ * (`agent_transcript_path`); every other hook from inside a subagent carries
+ * only the parent's `transcript_path`, and Claude Code keeps the subagent's
+ * beside it as `<session>/subagents/agent-<agent_id>.jsonl`.
+ */
+function subagentTranscriptPath(data, agentId) {
+    const named = data.agent_transcript_path;
+    if (typeof named === 'string' && path_1.default.basename(named) === `agent-${agentId}.jsonl`)
+        return named;
+    const parent = data.transcript_path;
+    if (typeof parent !== 'string' || !parent.endsWith('.jsonl'))
+        return '';
+    return path_1.default.join(parent.slice(0, -'.jsonl'.length), 'subagents', `agent-${agentId}.jsonl`);
+}
+/** The last `max` bytes of a file, from the first whole line; '' on any error. */
+function readTail(file, max) {
+    if (!file)
+        return '';
+    let fd;
+    try {
+        fd = fs_1.default.openSync(file, 'r');
+        const size = fs_1.default.fstatSync(fd).size;
+        const len = Math.min(size, max);
+        const buf = Buffer.alloc(len);
+        fs_1.default.readSync(fd, buf, 0, len, size - len);
+        const text = buf.toString('utf8');
+        return len < size ? text.slice(text.indexOf('\n') + 1) : text;
+    }
+    catch {
+        return '';
+    }
+    finally {
+        if (fd !== undefined)
+            try {
+                fs_1.default.closeSync(fd);
+            }
+            catch { /* already gone */ }
+    }
+}
+/**
+ * Background tasks a SUBAGENT was told have ended. A shell the subagent started
+ * reports back to the subagent, not to the parent: the `<task-notification>` is
+ * written into the subagent's transcript, and a subagent fires no
+ * UserPromptSubmit, so the path above never sees it and the shell's line
+ * stayed "running" until the 12 h ghost guard. It arrives in one of two
+ * records: a `queued_command` attachment (absorbed mid-turn), or a meta user
+ * message whose text leads with a "[SYSTEM NOTIFICATION …]" preamble. Only
+ * those are read, so a notification quoted in tool output is not taken for one.
+ */
+function subagentEndedTaskIds(file) {
+    const ids = [];
+    for (const line of readTail(file, SUBAGENT_TAIL_BYTES).split('\n')) {
+        if (!line.includes('<task-notification>'))
+            continue;
+        let record;
+        try {
+            record = JSON.parse(line);
+        }
+        catch {
+            continue;
+        }
+        const attachment = record?.attachment;
+        if (attachment?.type === 'queued_command' && typeof attachment.prompt === 'string') {
+            if (isTaskNotification(attachment.prompt))
+                ids.push(...endedTaskIds(attachment.prompt));
+        }
+        else if (record?.type === 'user' && record.isMeta === true && typeof record.message?.content === 'string') {
+            ids.push(...endedTaskIds(record.message.content));
+        }
+    }
+    // Oldest first, and a repeated id moves to its latest position, so the end of
+    // the list is always the most recent endings.
+    const recent = new Set();
+    for (const id of ids) {
+        recent.delete(id);
+        recent.add(id);
+    }
+    return [...recent];
+}
 function readBackgroundTasks(data, toolInput, toolName, out) {
     const response = data.tool_response ?? data.toolResponse;
     const bgId = response && typeof response === 'object' ? response.backgroundTaskId : undefined;
@@ -273,6 +361,18 @@ function readBackgroundTasks(data, toolInput, toolName, out) {
     }
     if (event === 'UserPromptSubmit' && typeof data.prompt === 'string' && isTaskNotification(data.prompt)) {
         out.bgTasksEnded = endedTaskIds(data.prompt).join(',');
+    }
+    if (out.agentId && (event === 'PreToolUse' || event === 'SubagentStop')) {
+        const ended = subagentEndedTaskIds(subagentTranscriptPath(data, out.agentId));
+        if (ended.length) {
+            // Keep a TaskStop from this call, then the NEWEST endings. Every hook
+            // rereads the same tail, so keeping the oldest would drop a fresh ending
+            // on every call until older records scrolled out of the tail.
+            const stopped = out.bgTasksEnded.split(',').filter(Boolean);
+            const room = MAX_TASK_NOTIFICATIONS - stopped.length;
+            const newest = ended.filter((id) => !stopped.includes(id)).slice(-room);
+            out.bgTasksEnded = [...stopped, ...newest].join(',');
+        }
     }
     if (event === 'SessionStart' && data.source === 'startup')
         out.freshSession = true;

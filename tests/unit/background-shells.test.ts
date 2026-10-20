@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'child_process';
+import fs from 'fs';
 import net from 'net';
+import os from 'os';
 import path from 'path';
 
 const sendMock = vi.fn();
@@ -128,6 +130,108 @@ describe('wmux-hook.js background shells (#276)', () => {
       tool_input: { task_id: 'b71nbhepv' },
     });
     expect(params.bgTasksEnded).toBe('b71nbhepv');
+  });
+
+  describe('a shell a subagent started', () => {
+    // Claude Code's layout: <dir>/<session>.jsonl, and each subagent's own
+    // transcript at <dir>/<session>/subagents/agent-<agent_id>.jsonl.
+    let dir: string;
+    let parent: string;
+    let child: string;
+
+    const absorbed = (prompt: string) => JSON.stringify({
+      type: 'attachment', isSidechain: true, agentId: 'a1b2c3',
+      attachment: { type: 'queued_command', prompt, commandMode: 'task-notification' },
+    });
+    const delivered = (prompt: string, isMeta = true) => JSON.stringify({
+      type: 'user', isSidechain: true, isMeta,
+      message: { role: 'user', content: `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n\n${prompt}` },
+    });
+    const quoted = (prompt: string) => JSON.stringify({
+      type: 'user', isSidechain: true, message: { role: 'user', content: [{ type: 'tool_result', content: prompt }] },
+    });
+
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wmux-subagent-'));
+      parent = path.join(dir, 'sess.jsonl');
+      child = path.join(dir, 'sess', 'subagents', 'agent-a1b2c3.jsonl');
+      fs.mkdirSync(path.dirname(child), { recursive: true });
+      fs.writeFileSync(parent, '');
+    });
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it('ends it on the subagent\'s next tool call, from the notification the subagent absorbed', async () => {
+      fs.writeFileSync(child, [
+        quoted(NOTIFICATION('bquoted')),
+        absorbed(NOTIFICATION('bdone')),
+        absorbed(NOTIFICATION('bstill', 'running')),
+      ].join('\n') + '\n');
+      const params = await hookParams(['--event', 'PreToolUse'], {
+        hook_event_name: 'PreToolUse', tool_name: 'Read', agent_id: 'a1b2c3', agent_type: 'general-purpose',
+        transcript_path: parent,
+      });
+      expect(params.bgTasksEnded).toBe('bdone');
+    });
+
+    it('also reads a notification delivered as a meta user message, but not a typed one', async () => {
+      fs.writeFileSync(child, [
+        delivered(NOTIFICATION('bmeta')),
+        delivered(NOTIFICATION('btyped'), false),
+      ].join('\n') + '\n');
+      const params = await hookParams(['--event', 'PreToolUse'], {
+        hook_event_name: 'PreToolUse', tool_name: 'Read', agent_id: 'a1b2c3', transcript_path: parent,
+      });
+      expect(params.bgTasksEnded).toBe('bmeta');
+    });
+
+    it('ends it when the subagent stops, from the transcript SubagentStop names', async () => {
+      const named = path.join(dir, 'elsewhere', 'agent-a1b2c3.jsonl');
+      fs.mkdirSync(path.dirname(named), { recursive: true });
+      fs.writeFileSync(named, absorbed(NOTIFICATION('bnamed')) + '\n');
+      const params = await hookParams(['--event', 'SubagentStop'], {
+        hook_event_name: 'SubagentStop', agent_id: 'a1b2c3', agent_transcript_path: named, transcript_path: parent,
+      });
+      expect(params.bgTasksEnded).toBe('bnamed');
+    });
+
+    it('keeps the newest endings when the tail holds more than the cap', async () => {
+      const lines = Array.from({ length: 40 }, (_, i) => absorbed(NOTIFICATION(`bold${i}`)));
+      lines.push(absorbed(NOTIFICATION('bold3'))); // re-reported: counts as recent
+      lines.push(absorbed(NOTIFICATION('bnewest')));
+      fs.writeFileSync(child, lines.join('\n') + '\n');
+      const params = await hookParams(['--event', 'PreToolUse'], {
+        hook_event_name: 'PreToolUse', tool_name: 'TaskStop', tool_input: { task_id: 'bstop' },
+        agent_id: 'a1b2c3', transcript_path: parent,
+      });
+      const ended = params.bgTasksEnded.split(',');
+      expect(ended).toHaveLength(32);
+      expect(ended[0]).toBe('bstop');
+      expect(ended).toContain('bnewest');
+      expect(ended).toContain('bold3');
+      expect(ended).toContain('bold39');
+      expect(ended).not.toContain('bold0');
+    });
+
+    it('keeps a TaskStop in the same call', async () => {
+      fs.writeFileSync(child, absorbed(NOTIFICATION('bdone')) + '\n');
+      const params = await hookParams(['--event', 'PreToolUse'], {
+        hook_event_name: 'PreToolUse', tool_name: 'TaskStop', tool_input: { task_id: 'bstop' },
+        agent_id: 'a1b2c3', transcript_path: parent,
+      });
+      expect(params.bgTasksEnded).toBe('bstop,bdone');
+    });
+
+    it('reads nothing on the main thread, or when the transcript is missing', async () => {
+      fs.writeFileSync(child, absorbed(NOTIFICATION('bdone')) + '\n');
+      const main = await hookParams(['--event', 'PreToolUse'], {
+        hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: parent,
+      });
+      const missing = await hookParams(['--event', 'PreToolUse'], {
+        hook_event_name: 'PreToolUse', tool_name: 'Read', agent_id: 'zzz999', transcript_path: parent,
+      });
+      expect(main.bgTasksEnded).toBeUndefined();
+      expect(missing.bgTasksEnded).toBeUndefined();
+    });
   });
 
   it('flags a fresh Claude Code process, not a resume or a /clear', async () => {
