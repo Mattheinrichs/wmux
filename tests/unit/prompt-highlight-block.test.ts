@@ -1,0 +1,210 @@
+// @vitest-environment jsdom
+//
+// The band has to describe the prompt's own text, not the whole terminal row.
+// OpenCode's TUI puts its session sidebar in the same terminal grid as the
+// transcript, so a full-width decoration paints through it (and a band sized by
+// the terminal's width undercounts a wrapped prompt in the narrower chat
+// column). These tests model that grid directly.
+import { describe, it, expect, beforeEach } from 'vitest';
+import type { Terminal } from '@xterm/xterm';
+import {
+  applyHighlight,
+  buildNeedle,
+  forgetSurface,
+  locatePromptBlock,
+  openMarkAt,
+} from '../../src/renderer/utils/prompt-marks';
+
+interface FakeDecoration {
+  options: Record<string, unknown>;
+  disposed: boolean;
+  onRender(cb: (el: HTMLElement) => void): void;
+  dispose(): void;
+}
+
+function fakeTerminal(rows: string[]) {
+  const decorations: FakeDecoration[] = [];
+  const state = { baseY: 0, cursorY: rows.length - 1 };
+  const term = {
+    rows: 24,
+    cols: 80,
+    options: { theme: { background: '#1e1e1e' } },
+    buffer: {
+      active: {
+        get baseY() { return state.baseY; },
+        get cursorY() { return state.cursorY; },
+        get cursorX() { return 0; },
+        getLine: (y: number) => (rows[y] === undefined
+          ? undefined
+          : { translateToString: () => rows[y] }),
+      },
+    },
+    registerMarker(offset: number) {
+      return {
+        line: state.baseY + state.cursorY + offset,
+        isDisposed: false,
+        dispose() { this.isDisposed = true; },
+      };
+    },
+    registerDecoration(options: Record<string, unknown>): FakeDecoration {
+      const decoration: FakeDecoration = {
+        options,
+        disposed: false,
+        onRender() {},
+        dispose() { this.disposed = true; },
+      };
+      decorations.push(decoration);
+      return decoration;
+    },
+  };
+  return { term: term as unknown as Terminal, decorations, rows };
+}
+
+const SURFACE = 'surf-block';
+const PROMPT = 'fix the flaky pty-manager test';
+
+function latest(decorations: FakeDecoration[]): FakeDecoration | undefined {
+  return decorations[decorations.length - 1];
+}
+
+beforeEach(() => forgetSurface(SURFACE));
+
+describe('the prompt block is the prompt’s own text', () => {
+  it('starts after a left sidebar and spans both hard lines', () => {
+    const rows = [
+      ' session one    │  first line of the prompt',
+      ' session two    │  second line of the prompt',
+    ];
+    const { term } = fakeTerminal(rows);
+    const block = locatePromptBlock(term, 0, 'first line of the prompt\nsecond line of the prompt');
+
+    expect(block).not.toBeNull();
+    expect(block!.line).toBe(0);
+    expect(block!.rows).toBe(2);
+    expect(block!.startCol).toBe(rows[0].indexOf('first'));
+    expect(block!.endCol).toBe(rows[1].lastIndexOf('prompt') + 'prompt'.length - 1);
+    expect(block!.startCol).toBeGreaterThan(rows[0].indexOf('│'));
+  });
+
+  it('stops before a right sidebar', () => {
+    const row = '│  first line of the prompt                         │ session two';
+    const { term } = fakeTerminal([row]);
+    const block = locatePromptBlock(term, 0, 'first line of the prompt');
+
+    expect(block).not.toBeNull();
+    expect(block!.endCol).toBe(row.indexOf('prompt') + 'prompt'.length - 1);
+    expect(block!.endCol).toBeLessThan(row.indexOf('│ session two'));
+  });
+
+  it('counts a soft-wrapped prompt as the rows it really occupies', () => {
+    const rows = [
+      '│  a very long prompt line that',
+      '   continues on the next row',
+    ];
+    const { term } = fakeTerminal(rows);
+    const block = locatePromptBlock(term, 0, 'a very long prompt line that continues on the next row');
+
+    expect(block).not.toBeNull();
+    expect(block!.rows).toBe(2);
+    expect(block!.startCol).toBe(rows[0].indexOf('a'));
+    expect(block!.endCol).toBe(rows[1].lastIndexOf('row') + 'row'.length - 1);
+  });
+
+  it('answers null when the rows do not carry the prompt', () => {
+    const { term } = fakeTerminal(['│  something else entirely']);
+    expect(locatePromptBlock(term, 0, PROMPT)).toBeNull();
+  });
+});
+
+describe('the decoration is bounded to that block', () => {
+  it('paints from the prompt text, not from column zero', () => {
+    const rows = [` session one │  ${PROMPT}`];
+    const { term, decorations } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 1,
+      ruler: true,
+      needle: buildNeedle(PROMPT),
+      confirmed: false,
+      text: PROMPT,
+    });
+
+    const start = rows[0].indexOf('fix');
+    const end = rows[0].lastIndexOf('test') + 'test'.length - 1;
+    expect(latest(decorations)?.options.x).toBe(start - 1);
+    expect(latest(decorations)?.options.width).toBe(end - (start - 1) + 1);
+    expect(latest(decorations)?.options.width).toBeLessThan(80);
+  });
+
+  it('sizes a multi-line block from the echoed rows, not the estimate', () => {
+    const text = 'first line of the prompt\nsecond line of the prompt';
+    const rows = [
+      '│  first line of the prompt',
+      '│  second line of the prompt',
+    ];
+    const { term, decorations } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 1,
+      ruler: true,
+      needle: buildNeedle(text),
+      confirmed: false,
+      text,
+    });
+
+    expect(latest(decorations)?.options.height).toBe(2);
+  });
+
+  it('withholds the tint while the block is still the live input row', () => {
+    const rows = [`> ${PROMPT}`];
+    const { term, decorations } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 1,
+      ruler: true,
+      needle: buildNeedle(PROMPT),
+      confirmed: false,
+      text: PROMPT,
+      liveAfter: 0,
+    });
+
+    expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
+    expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
+  });
+
+  it('tints once the block is above the live input row', () => {
+    const rows = [`> ${PROMPT}`];
+    const { term, decorations } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 1,
+      ruler: true,
+      needle: buildNeedle(PROMPT),
+      confirmed: false,
+      text: PROMPT,
+      liveAfter: 1,
+    });
+
+    expect(latest(decorations)?.options.backgroundColor).toBeTruthy();
+  });
+
+  it('keeps only the ruler when no block can be found', () => {
+    const { term, decorations } = fakeTerminal(['│  something else entirely']);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 3,
+      ruler: true,
+      needle: buildNeedle(PROMPT),
+      confirmed: false,
+      text: PROMPT,
+    });
+
+    expect(latest(decorations)?.options.backgroundColor).toBeUndefined();
+    expect(latest(decorations)?.options.overviewRulerOptions).toBeTruthy();
+  });
+});

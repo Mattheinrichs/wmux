@@ -262,6 +262,110 @@ export function lineOf(surfaceId: string, entryId: string): number | null {
   return marker.line >= 0 ? marker.line : null;
 }
 
+export interface PromptBlock {
+  /** Absolute line of the first row carrying the prompt's text. */
+  line: number;
+  /** Rows the text actually occupies, wrapping included. */
+  rows: number;
+  /** First raw column that carries the prompt's text. */
+  startCol: number;
+  /** Last raw column that carries the prompt's text, inclusive. */
+  endCol: number;
+}
+
+/**
+ * Where a prompt's own text sits in the buffer (issue #230 follow-up).
+ *
+ * The old estimate sized a band from the TERMINAL's width, which is not the
+ * width the agent rendered into: OpenCode puts a session sidebar in the same
+ * grid, and wraps the transcript in the column beside it. A prompt that wraps
+ * there is taller than the estimate, and a full-row band paints through the
+ * sidebar. Both are geometry questions the text itself can answer.
+ *
+ * The prompt is matched as a stream of non-space characters, one row at a time.
+ * Whitespace is ignored because a TUI re-wraps and re-indents what it echoes;
+ * characters are not, because that is the only part a TUI cannot invent. The
+ * first token locates the start (after any sidebar), and the rest of the stream
+ * decides where the block ends and how many rows it covers.
+ *
+ * Null is the honest answer when the rows no longer carry the text: the caller
+ * keeps the ruler tick and drops the band rather than guessing.
+ */
+export function locatePromptBlock(
+  terminal: Terminal,
+  from: number,
+  text: string,
+): PromptBlock | null {
+  const expected = normalizeForMatch(text);
+  const chars = expected.replace(/ /g, '');
+  if (!chars) return null;
+
+  const firstToken = expected.split(' ')[0];
+  if (!firstToken) return null;
+
+  const row = lineText(terminal, from);
+  const lower = row.toLowerCase();
+  // Try every occurrence: a sidebar session title can contain the same word,
+  // and only one of them is followed by the rest of the prompt.
+  for (let at = lower.indexOf(firstToken); at >= 0; at = lower.indexOf(firstToken, at + 1)) {
+    const block = consumeBlock(terminal, from, at, chars);
+    if (block) return block;
+  }
+  return null;
+}
+
+/**
+ * Walk rows from `startCol` until every non-space character of the prompt has
+ * been met. Returns where the stream ended, or null when the row diverges from
+ * the text before it is complete.
+ *
+ * Continuation rows restart a little to the left of the first row's column:
+ * wrapped text keeps its indent, but a hard newline may be indented by the TUI
+ * differently, and a couple of cells of slack costs nothing.
+ */
+function consumeBlock(
+  terminal: Terminal,
+  from: number,
+  startCol: number,
+  chars: string,
+): PromptBlock | null {
+  let ptr = 0;
+  let start = -1;
+  let end = -1;
+
+  for (let offset = 0; offset < MAX_HIGHLIGHT_ROWS; offset++) {
+    const raw = lineText(terminal, from + offset);
+    if (!raw) {
+      if (ptr > 0) return null;
+      continue;
+    }
+
+    let i = offset === 0 ? startCol : Math.max(0, startCol - 2);
+    while (i < raw.length) {
+      if (ptr === chars.length) break;
+      const ch = raw[i];
+      if (/\s/.test(ch)) { i++; continue; }
+      if (ptr === 0 && isBoxChar(ch)) { i++; continue; }
+      if (ch.toLowerCase() !== chars[ptr]) return null;
+      if (start < 0) start = i;
+      end = i;
+      ptr++;
+      i++;
+    }
+
+    if (ptr === chars.length) {
+      return { line: from, rows: offset + 1, startCol: start, endCol: end };
+    }
+  }
+
+  return null;
+}
+
+/** The vertical borders TUI layouts draw around their regions. */
+function isBoxChar(ch: string): boolean {
+  return '│┃┆┇┊┋╎╏|║'.includes(ch);
+}
+
 export interface HighlightOptions {
   /** CSS color for the tint and the left rail. */
   color: string;
@@ -285,6 +389,18 @@ export interface HighlightOptions {
    * gets the pre-#230 behaviour.
    */
   confirmed?: boolean;
+  /**
+   * The prompt's full text, when the caller has it. Its presence switches the
+   * geometry from the terminal-width estimate to the echoed block: the band
+   * covers the text's own columns and rows instead of the whole terminal row.
+   */
+  text?: string;
+  /**
+   * Absolute line of the agent's live input region at submission. A block at or
+   * below this line is still the composer (or the TUI's repaint zone), so only
+   * the ruler tick is drawn until the echo has scrolled above it.
+   */
+  liveAfter?: number;
 }
 
 /** Most rows one prompt highlight may cover. */
@@ -423,26 +539,46 @@ export function applyHighlight(
   surfaceId: string,
   entryId: string,
   options: HighlightOptions,
-): void {
+): boolean {
   const record = marks.get(surfaceId)?.get(entryId);
-  if (!record || record.marker.line < 0) return;
+  if (!record || record.marker.line < 0) return false;
   clearHighlight(surfaceId, entryId);
 
-  const height = Math.max(1, Math.min(MAX_HIGHLIGHT_ROWS, Math.floor(options.rows) || 1));
+  const block = options.text ? locatePromptBlock(terminal, record.marker.line, options.text) : null;
+  const deferred = block !== null
+    && options.liveAfter !== undefined
+    && block.line >= options.liveAfter;
+  const height = Math.max(1, Math.min(MAX_HIGHLIGHT_ROWS, block?.rows ?? (Math.floor(options.rows) || 1)));
   const needle = options.needle ?? null;
   // An uncheckable prompt falls back to what the SOURCE can promise: a shell's
   // row is named by OSC 133, an agent's is a guess.
-  const found = needle ? needleRow(terminal, record.marker.line, height, needle) : null;
-  const onTheRow = needle ? found !== null : options.confirmed !== false;
+  //
+  // A block, when the caller supplied the text, is checked on its FIRST row:
+  // that is where the prompt starts, and a later row still carrying a fragment
+  // is not enough to claim the band is on the text.
+  const found = needle
+    ? needleRow(terminal, record.marker.line, options.text ? 1 : height, needle)
+    : null;
+  const onTheRow = options.text
+    ? block !== null && !deferred && (needle === null ? options.confirmed !== false : found !== null)
+    : (needle ? found !== null : options.confirmed !== false);
   const tint = onTheRow ? blendOverBackground(options.color, backgroundOf(terminal)) : null;
   // Nothing left to draw: no band, and no tick asked for.
-  if (!onTheRow && !options.ruler) return;
+  if (!onTheRow && !options.ruler) return false;
+
+  // The rail lives in CSS, inset 4px from the decoration's left edge, so the
+  // decoration starts one cell before the text. That keeps the rail in the
+  // margin a TUI leaves there instead of covering the first glyph.
+  const x = block && onTheRow ? Math.max(0, block.startCol - 1) : 0;
+  const width = block && onTheRow
+    ? Math.max(1, Math.min(terminal.cols - x, block.endCol - x + 1))
+    : terminal.cols;
 
   try {
     const decoration = terminal.registerDecoration({
       marker: record.marker,
-      x: 0,
-      width: terminal.cols,
+      x,
+      width,
       height,
       layer: 'bottom',
       ...(tint ? { backgroundColor: tint } : {}),
@@ -450,11 +586,11 @@ export function applyHighlight(
         ? { overviewRulerOptions: { color: options.color, position: 'left' as const } }
         : {}),
     });
-    if (!decoration) return;
+    if (!decoration) return false;
     if (onTheRow) {
       decoration.onRender((element) => {
         // onRender fires again every time the row is re-laid-out (resize, scroll
-        // back into view), so this must be idempotent — classList and a custom
+        // back into view), so this must be idempotent: classList and a custom
         // property both are.
         element.classList.add('wmux-prompt-mark');
         element.style.setProperty('--wmux-prompt-color', options.color);
@@ -465,7 +601,8 @@ export function applyHighlight(
         // Nothing to re-check when the tint rests on the caller's word rather
         // than on the row's text.
         if (!needle || found === null) return;
-        if (needleRow(terminal, record.marker.line + found, 1, needle) !== null) return;
+        const row = record.marker.line + found;
+        if (needleRow(terminal, row, 1, needle) !== null) return;
         // The row stopped carrying the prompt. Re-deciding means disposing this
         // decoration, which must not happen from inside xterm's own render pass
         // — it is iterating the decoration list right now. One deferred pass per
@@ -481,9 +618,11 @@ export function applyHighlight(
       });
     }
     record.decorations.push(decoration);
+    return onTheRow;
   } catch {
     // Decorations are proposed API. A future xterm that changes the shape here
     // must degrade to "no highlight", never to a broken pane.
+    return false;
   }
 }
 
