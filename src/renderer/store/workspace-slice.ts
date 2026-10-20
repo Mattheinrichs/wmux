@@ -312,6 +312,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
       // when it is POSIX is the only place the project path can still be found.
       posixCwd: config.posixCwd ?? (config.cwd && isPosixPath(config.cwd) ? config.cwd : undefined),
       browserUrl: config.browserUrl,
+      browserHistory: config.browserHistory,
       browserWidth: config.browserWidth,
       explorerOpen: config.explorerOpen,
       explorerWidth: config.explorerWidth,

@@ -138,9 +138,10 @@ describe('the webview src stays pinned', () => {
   });
 
   it('never assigns initialSrc after the initial state', () => {
-    // `const [initialSrc] = useState(initialUrl)` — no setter is destructured,
-    // so there is nothing that could re-point it.
-    expect(PANE_CODE).toMatch(/const \[initialSrc\] = useState\(initialUrl\)/);
+    // `const [initialSrc] = useState(...)` — no setter is destructured, so
+    // there is nothing that could re-point it. The initializer is the history
+    // restore sentinel or `initialUrl` (#315), decided once on mount.
+    expect(PANE_CODE).toMatch(/const \[initialSrc\] = useState\(\(\) => historyRestoreSrc\(engine, initialUrl, initialHistory\) \?\? initialUrl\)/);
     expect(PANE_CODE).not.toMatch(/setInitialSrc/);
   });
 

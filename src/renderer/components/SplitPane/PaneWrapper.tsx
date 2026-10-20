@@ -12,6 +12,7 @@ import NotificationRing from '../Terminal/NotificationRing';
 import SurfaceTabBar from './SurfaceTabBar';
 import { useStore } from '../../store';
 import { shouldRememberUrl } from '../../utils/browser-start-page';
+import { activeHistoryUrl } from '../../../shared/browser-history';
 import { keyDismissesAttention } from './attention-dismiss';
 import type { SurfaceDragCommitOptions, SurfaceDragPayload, SurfaceDragPreviewTarget } from './drag-preview-types';
 import {
@@ -310,6 +311,15 @@ export default function PaneWrapper({
               onUrlChange={(u) => {
                 if (shouldRememberUrl(u)) {
                   updateSurface(workspaceId, paneId, surface.id, { url: u });
+                }
+              }}
+              // Back/Forward across that same remount, and across a restart
+              // (#315). Same guard as the URL: a stack whose page would not be
+              // remembered is not remembered either.
+              initialHistory={surface.browserHistory}
+              onHistoryChange={(history) => {
+                if (shouldRememberUrl(activeHistoryUrl(history))) {
+                  updateSurface(workspaceId, paneId, surface.id, { browserHistory: history });
                 }
               }}
             />

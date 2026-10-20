@@ -1,3 +1,4 @@
+import type { BrowserHistory } from './browser-history';
 // ID types
 export type WorkspaceId = `ws-${string}`;
 export type PaneId = `pane-${string}`;
@@ -112,6 +113,8 @@ export interface SurfaceRef {
   ompSessionId?: string;
   /** Initial URL for a browser surface created from a quick-launch profile (issue #32). */
   url?: string;
+  /** A browser surface's back/forward stack, restored on mount (#315). See shared/browser-history.ts. */
+  browserHistory?: BrowserHistory;
   /**
    * Which engine backs this browser surface. Absent ⇒ 'web'. Read through
    * `engineOf()` rather than directly, so an absent or corrupt value can only
@@ -419,6 +422,8 @@ export interface WorkspaceInfo {
   // (undefined) means automatic.
   statusOverride?: 'running' | 'idle';
   browserUrl?: string;
+  /** The side panel's back/forward stack (#315), kept beside browserUrl. */
+  browserHistory?: BrowserHistory;
   browserWidth?: number;
   explorerOpen?: boolean;
   explorerWidth?: number;
@@ -562,6 +567,7 @@ export interface SavedSession {
     posixCwd?: string;
     splitTree: SplitNode;
     browserUrl?: string;
+    browserHistory?: BrowserHistory;
     // Both written since 0.4x; declared here as of #145, which was caused by a
     // save path quietly dropping fields the type never mentioned.
     browserWidth?: number;
@@ -765,6 +771,12 @@ export const IPC_CHANNELS = {
   AGENT_BROWSER_INSTALL: 'agent-browser:install',
   AGENT_BROWSER_CURRENT_URL: 'agent-browser:current-url',
   AGENT_BROWSER_OPEN: 'agent-browser:open',
+  /**
+   * The back/forward stack of a browser pane's webview, read so it can be
+   * persisted (#315). Takes the guest's webContentsId and answers only for a
+   * guest hosted by the window that asks.
+   */
+  BROWSER_GET_HISTORY: 'browser:get-history',
   // Active workspace query (renderer → main)
   GET_ACTIVE_WORKSPACE: 'get-active-workspace',
   // Hook events (Claude Code hooks → main → renderer)

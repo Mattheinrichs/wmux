@@ -175,6 +175,7 @@ describe('handleVersionChange (issue #35)', () => {
             id: 'ws-1', title: 'Docs', pinned: true, shell: 'pwsh.exe', cwd: 'C:\\proj',
             splitTree: { type: 'leaf' },
             browserUrl: 'https://example.com/dashboard',
+            browserHistory: { entries: [{ url: 'https://example.com/', title: 'Home' }, { url: 'https://example.com/dashboard', title: 'Dash' }], index: 1 },
             browserWidth: 640,
           },
         ],
@@ -187,6 +188,9 @@ describe('handleVersionChange (issue #35)', () => {
     expect(ws.browserUrl).toBe('https://example.com/dashboard');
     expect(ws.browserWidth).toBe(640);
     expect(ws.pinned).toBe(true);
+    // #315: Back/Forward survives the backup like the URL does.
+    expect((ws as any).browserHistory?.index).toBe(1);
+    expect((ws as any).browserHistory?.entries).toHaveLength(2);
   });
 
   it('normalizes a workspace that never opened a browser', () => {

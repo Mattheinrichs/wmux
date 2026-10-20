@@ -29,6 +29,7 @@ import ConfirmCloseDialog from './components/ConfirmCloseDialog';
 import ConfirmCloseSurfaceDialog from './components/ConfirmCloseSurfaceDialog';
 import BrowserPane from './components/Browser/BrowserPane';
 import { rememberedPanelUrl, shouldRememberPanelUrl } from './utils/browser-start-page';
+import { activeHistoryUrl } from '../shared/browser-history';
 import { ExplorerPanel } from './components/Explorer/ExplorerPanel';
 import Tutorial from './components/Tutorial/Tutorial';
 import SplitPreviewOverlay from './components/SplitPane/SplitPreviewOverlay';
@@ -1163,6 +1164,7 @@ export default function App() {
             // every restored terminal to the same place.
             splitTree: dropCodeContent(dropEphemeralSurfaces(freezeSurfaceCwds(ws.splitTree))),
             browserUrl: ws.browserUrl,
+            browserHistory: ws.browserHistory,
             browserWidth: ws.browserWidth,
             explorerOpen: ws.explorerOpen,
             explorerWidth: ws.explorerWidth,
@@ -1331,6 +1333,7 @@ export default function App() {
         // unidentifiable after a restore.
         splitTree: dropCodeContent(dropEphemeralSurfaces(freezeSurfaceCwds(ws.splitTree))),
         browserUrl: ws.browserUrl || '',
+        browserHistory: ws.browserHistory,
         browserWidth: ws.browserWidth,
         explorerOpen: ws.explorerOpen,
         explorerWidth: ws.explorerWidth,
@@ -1886,6 +1889,15 @@ export default function App() {
                     // navigated to, so neither is remembered as one.
                     onUrlChange={(url) => {
                       if (shouldRememberPanelUrl(url)) updateWorkspaceMetadata(ws.id, { browserUrl: url });
+                    }}
+                    // Back/Forward across a restart (#315). BrowserPane uses it
+                    // only when its active page is the initialUrl above, so the
+                    // #232 rules keep deciding which page opens.
+                    initialHistory={ws.browserHistory}
+                    onHistoryChange={(history) => {
+                      if (shouldRememberPanelUrl(activeHistoryUrl(history))) {
+                        updateWorkspaceMetadata(ws.id, { browserHistory: history });
+                      }
                     }}
                   />
                 </div>

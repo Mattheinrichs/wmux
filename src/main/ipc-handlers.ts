@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, clipboard, shell, dialog, app, nativeTheme } from 'electron';
+import { ipcMain, BrowserWindow, clipboard, shell, dialog, app, nativeTheme, webContents } from 'electron';
 import * as path from 'path';
 import { promises as fsp } from 'fs';
 import { IPC_CHANNELS, SurfaceId, WindowId, WorkspaceId, AgentId, type InsertionResult, type ExplorerListError } from '../shared/types';
@@ -71,6 +71,7 @@ import {
 } from './agent-browser-runtime';
 import type { AgentSession } from './agent-browser-session';
 import { resolveSurfaceEnv } from './surface-env';
+import { readGuestHistory } from './browser-history-restore';
 
 // Claimed at module load, before anything can spawn a PTY, so the candidate
 // list is strictly what a PREVIOUS instance left behind (issue #139). The
@@ -982,6 +983,18 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
   ipcMain.handle(IPC_CHANNELS.AGENT_BROWSER_DISABLE, (_event, surfaceId: string) => {
     agentBrowserOwners.delete(surfaceId as SurfaceId);
     return disableAgentBrowser(surfaceId as SurfaceId, agentBrowserDeps);
+  });
+
+  /**
+   * A browser pane's back/forward stack (#315). The id comes from the renderer,
+   * so it must name a webview guest that THIS window hosts — never another
+   * window's pane, and never a window's own webContents.
+   */
+  ipcMain.handle(IPC_CHANNELS.BROWSER_GET_HISTORY, (event, webContentsId: unknown) => {
+    if (typeof webContentsId !== 'number') return null;
+    const guest = webContents.fromId(webContentsId);
+    if (!guest || guest.isDestroyed() || guest.getType() !== 'webview' || guest.hostWebContents !== event.sender) return null;
+    return readGuestHistory(guest);
   });
 
   /** Where the agent actually is — see the channel's note in types.ts. */

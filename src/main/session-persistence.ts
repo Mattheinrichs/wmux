@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getAppDataDir } from '../shared/instance';
+import type { BrowserHistory } from '../shared/browser-history';
 
 const APPDATA_DIR = getAppDataDir();
 const SESSIONS_DIR = path.join(APPDATA_DIR, 'sessions');
@@ -31,6 +32,7 @@ export interface SessionData {
       // The renderer has always written these two; the interface omitting them
       // is what let backupAutoSession drop them without tsc noticing (#145).
       browserUrl?: string;
+      browserHistory?: BrowserHistory;
       browserWidth?: number;
       // Same lifecycle as browserWidth: written by the renderer, and dropped
       // by backupAutoSession until the interface named it (#145).
@@ -152,6 +154,7 @@ function backupAutoSession(previousVersion: string): void {
         posixCwd: w.posixCwd || '',
         splitTree: w.splitTree,
         browserUrl: w.browserUrl || '',
+        browserHistory: w.browserHistory,
         browserWidth: w.browserWidth,
         explorerOpen: w.explorerOpen,
         explorerWidth: w.explorerWidth,
@@ -434,6 +437,7 @@ export function writeSessionSnapshot(data: SessionData, at: number = Date.now())
         posixCwd: w.posixCwd || '',
         splitTree: w.splitTree,
         browserUrl: w.browserUrl || '',
+        browserHistory: w.browserHistory,
         browserWidth: w.browserWidth,
         explorerOpen: w.explorerOpen,
         explorerWidth: w.explorerWidth,

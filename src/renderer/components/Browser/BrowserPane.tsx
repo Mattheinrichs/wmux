@@ -5,6 +5,13 @@ import AgentBrowserSetup from './AgentBrowserSetup';
 import { popupBridgeSource } from './popup-bridge';
 import type { BrowserEngine } from '../../../shared/types';
 import { BROWSER_BLANK_PAGE } from '../../utils/browser-start-page';
+import {
+  activeHistoryUrl,
+  encodeHistoryRestoreSrc,
+  sameBrowserHistory,
+  sanitizeBrowserHistory,
+  type BrowserHistory,
+} from '../../../shared/browser-history';
 import '../../styles/browser.css';
 
 interface BrowserPaneProps {
@@ -20,6 +27,31 @@ interface BrowserPaneProps {
    */
   engine?: BrowserEngine;
   onEngineChange?: (engine: BrowserEngine) => void;
+  /**
+   * The back/forward stack this pane had (#315), restored on mount. Used only
+   * when its active entry IS `initialUrl`: the caller's URL rules (#232) stay
+   * the authority on which page opens, and the history only adds Back/Forward.
+   */
+  initialHistory?: BrowserHistory;
+  /** The stack changed — persist it beside the URL. Web mode only. */
+  onHistoryChange?: (history: BrowserHistory) => void;
+}
+
+/**
+ * The src a pane mounts on: the restore sentinel when there is a stack worth
+ * restoring, or null for a plain `initialUrl` load. A one-entry stack restores
+ * nothing a plain load would not, and agent mode never shows the page itself.
+ * Re-sanitized because session.json is a file the user can edit.
+ */
+export function historyRestoreSrc(
+  engine: BrowserEngine,
+  initialUrl: string,
+  history: BrowserHistory | undefined,
+): string | null {
+  if (engine !== 'web') return null;
+  const clean = sanitizeBrowserHistory(history);
+  if (!clean || clean.entries.length < 2 || activeHistoryUrl(clean) !== initialUrl) return null;
+  return encodeHistoryRestoreSrc(clean);
 }
 
 /**
@@ -190,6 +222,8 @@ export default function BrowserPane({
   onUrlChange,
   engine = 'web',
   onEngineChange,
+  initialHistory,
+  onHistoryChange,
 }: BrowserPaneProps) {
   // src is fixed to the initial page; all later navigation goes through loadURL
   // (below). Binding src to a mutable url state AND calling loadURL made every
@@ -201,12 +235,18 @@ export default function BrowserPane({
   // unstable identity in a dependency ARRAY. This one is read in JSX and never
   // closed over by an effect.
   const t = useT();
-  const [initialSrc] = useState(initialUrl);
+  // A pane with a saved back/forward stack mounts on the restore sentinel and
+  // main rebuilds the stack before the guest loads anything (#315); the active
+  // entry is `initialUrl` either way, so the address bar starts on it.
+  const [initialSrc] = useState(() => historyRestoreSrc(engine, initialUrl, initialHistory) ?? initialUrl);
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [isLoading, setIsLoading] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const webviewRef = useRef<any>(null);
+  const onHistoryChangeRef = useRef(onHistoryChange);
+  onHistoryChangeRef.current = onHistoryChange;
+  const lastHistoryRef = useRef<BrowserHistory | null>(null);
 
   // Agent mode. `agentUrl` is the page the REMOTE Chrome was last asked to
   // open; it is what the address bar shows in agent mode, because the webview's
@@ -329,6 +369,21 @@ export default function BrowserPane({
     const wv = webviewRef.current;
     if (!wv) return;
 
+    // The stack after a navigation, for the caller to persist (#315). Main reads
+    // it off the guest: the <webview> element exposes canGoBack, not entries.
+    const refreshHistory = () => {
+      if (engineRef.current === 'agent' || !onHistoryChangeRef.current) return;
+      let id: number | undefined;
+      try { id = wv.getWebContentsId?.(); } catch { return; } // not attached yet
+      if (typeof id !== 'number') return;
+      window.wmux?.browser?.getHistory?.(id).then((history: BrowserHistory | null) => {
+        if (!history || !mountedRef.current || engineRef.current === 'agent') return;
+        if (sameBrowserHistory(history, lastHistoryRef.current)) return;
+        lastHistoryRef.current = history;
+        onHistoryChangeRef.current?.(history);
+      }).catch(() => {});
+    };
+
     const onNavigate = (e: any) => {
       // In agent mode every navigation here is the dashboard SPA moving around
       // inside itself. Recording it would overwrite the surface's persisted
@@ -339,6 +394,7 @@ export default function BrowserPane({
       onUrlChange?.(e.url);
       setCanGoBack(wv.canGoBack());
       setCanGoForward(wv.canGoForward());
+      refreshHistory();
     };
     const onStartLoad = () => setIsLoading(true);
     const onStopLoad = () => {
@@ -347,6 +403,8 @@ export default function BrowserPane({
       const finalUrl = wv.getURL();
       setCurrentUrl(finalUrl);
       onUrlChange?.(finalUrl);
+      // Titles arrive after the commit; this is when the entry has its own.
+      refreshHistory();
     };
     // The dashboard is optional observability. When it is not listening, the
     // webview paints ERR_CONNECTION_REFUSED, which the user reads as a broken

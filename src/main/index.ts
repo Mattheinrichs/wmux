@@ -53,6 +53,7 @@ import {
 } from './session-persistence';
 import { SessionFlushWaiters } from './session-flush';
 import { hardenWebviewPreferences } from './webview-prefs';
+import { applyHistoryRestore, claimHistoryRestore, forgetHistoryRestore, parkHistoryRestore } from './browser-history-restore';
 import { stampAgentSessionIds } from './agent-session-persistence';
 import { noteIconRevision } from './icon-cache';
 import { installGpuWatchdog } from './gpu-watchdog';
@@ -1058,7 +1059,17 @@ function hardenWebContents(): void {
     if (type === 'window' || type === 'webview') {
       contents.on('will-attach-webview', (_e, webPreferences, params) => {
         hardenWebviewPreferences(webPreferences as Record<string, unknown>, params as Record<string, unknown>);
+        // A browser pane mounting on its saved back/forward stack (#315).
+        // Order matters: see browser-history-restore.ts.
+        if (type === 'window') parkHistoryRestore(params as Record<string, unknown>);
       });
+    }
+    if (type === 'window') {
+      contents.on('did-attach-webview', (_e, guest) => { applyHistoryRestore(guest); });
+    }
+    if (type === 'webview') {
+      claimHistoryRestore(contents.id);
+      contents.once('destroyed', () => forgetHistoryRestore(contents.id));
     }
 
     if (type === 'webview') {

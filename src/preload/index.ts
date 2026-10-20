@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import * as os from 'os';
 import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult } from '../shared/types';
+import type { BrowserHistory } from '../shared/browser-history';
 import type {
   RemoteConsoleBridge,
   RemoteConsoleStatus,
@@ -139,6 +140,9 @@ contextBridge.exposeInMainWorld('wmux', {
       // Dispatch a custom event that BrowserPane listens for
       window.dispatchEvent(new CustomEvent('wmux:browser-navigate', { detail: { url, surfaceId: surfaceId || undefined } }));
     },
+    /** The webview's back/forward stack, to persist it (#315). Null for a guest this window does not host. */
+    getHistory: (webContentsId: number): Promise<BrowserHistory | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GET_HISTORY, webContentsId),
   },
   agent: {
     list: (workspaceId?: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_LIST, workspaceId),
