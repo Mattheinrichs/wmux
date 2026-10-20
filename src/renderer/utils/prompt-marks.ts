@@ -370,7 +370,7 @@ function patternFor(text: string): { chars: string; firstToken: string } {
   const expected = normalizeForMatch(text);
   const pattern = {
     chars: expected.replace(/ /g, ''),
-    firstToken: expected.split(' ')[0] ?? '',
+    firstToken: (expected.split(' ')[0] ?? '').slice(0, 8),
   };
   if (promptPatterns.size >= MAX_PROMPT_PATTERNS) {
     const oldest = promptPatterns.keys().next().value;
@@ -458,6 +458,11 @@ function consumeBlock(
     }
   }
 
+  // A prompt longer than the band may cover is still a prompt: keep the block
+  // it managed to verify, capped, rather than dropping the highlight entirely.
+  if (ptr > 0 && start >= 0) {
+    return { line: from, rows: MAX_HIGHLIGHT_ROWS, startCol: start, endCol: end };
+  }
   return null;
 }
 

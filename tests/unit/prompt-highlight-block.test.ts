@@ -137,6 +137,30 @@ describe('the prompt block is the prompt’s own text', () => {
     expect(block!.endCol).toBe(rows[2].lastIndexOf('paragraph') + 'paragraph'.length - 1);
   });
 
+  it('caps a very long prompt at the highlight row budget instead of dropping it', () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1} of a long pasted prompt`);
+    const rows = [...lines.map((line) => `│  ${line}`), ''];
+    const { term } = fakeTerminal(rows);
+    const block = locatePromptBlock(term, 0, lines.join('\n'));
+
+    expect(block).not.toBeNull();
+    expect(block!.rows).toBe(24);
+  });
+
+  it('finds a block whose first token wraps across rows', () => {
+    const rows = [
+      '│  https://example.com/a/very',
+      '   /long/path/that/wraps',
+      '',
+    ];
+    const { term } = fakeTerminal(rows);
+    const block = locatePromptBlock(term, 0, 'https://example.com/a/very/long/path/that/wraps');
+
+    expect(block).not.toBeNull();
+    expect(block!.rows).toBe(2);
+    expect(block!.startCol).toBe(rows[0].indexOf('https'));
+  });
+
   it('answers null when the rows do not carry the prompt', () => {
     const { term } = fakeTerminal(['│  something else entirely']);
     expect(locatePromptBlock(term, 0, PROMPT)).toBeNull();
