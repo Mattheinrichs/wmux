@@ -483,6 +483,16 @@ describe('callWmux (#310)', () => {
     expect(done).toHaveBeenCalledTimes(2);
   });
 
+  it('bounds every call — a hung CLI must not hold the activity reporter in flight forever', async () => {
+    const { callWmux } = await load();
+    callWmux(runtimeNode, ['x'], () => {}, { WMUX_CLI: 'wmux.js' }, 'linux');
+    callWmux(runtimeNode, ['x'], () => {}, {}, 'linux');
+    for (const call of calls) {
+      expect(call.opts.timeout).toBeGreaterThan(0);
+      expect(Number.isFinite(call.opts.timeout)).toBe(true);
+    }
+  });
+
   it('falls back to `wmux` on PATH elsewhere', async () => {
     const { callWmux } = await load();
     callWmux(runtimeNode, ['x'], () => {}, {}, 'linux');

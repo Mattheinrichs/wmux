@@ -130,6 +130,9 @@ export function makeLogger(file) {
   };
 }
 
+/** How long one CLI call may run before execFile kills it and reports done. */
+const CLI_TIMEOUT_MS = 10_000;
+
 /**
  * Run the wmux CLI without ever blocking or throwing into OpenCode.
  *
@@ -148,7 +151,9 @@ export function callWmux(runtime, argv, log = () => {}, env = process.env, platf
   };
   try {
     const cli = env.WMUX_CLI;
-    const opts = { windowsHide: true };
+    // Bounded: the activity reporter keeps one call in flight and waits on
+    // `done`, so a CLI that never returned would silence every later report.
+    const opts = { windowsHide: true, timeout: CLI_TIMEOUT_MS };
     let file;
     let args;
     if (cli) {
