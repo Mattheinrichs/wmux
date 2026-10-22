@@ -6,7 +6,7 @@ import { PaneId, SurfaceId, SurfaceRef, WorkspaceId, WorkspaceInfo, SplitNode } 
 import { cwdReportPatch } from '../shared/paths';
 import { classifyClaudeNotification } from '../shared/claude-notification';
 import SplitContainer from './components/SplitPane/SplitContainer';
-import { updateRatio, getAllPaneIds, findLeaf, replaceSoleTerminalSurface, freezeSurfaceCwds, dropEphemeralSurfaces, dropCodeContent } from './store/split-utils';
+import { updateRatio, getAllPaneIds, findLeaf, replaceSoleTerminalSurface, freezeSurfaceCwds, dropEphemeralSurfaces, dropCodeContent, workspaceHasTerminalCwd } from './store/split-utils';
 import { forgetProgressTurn } from './utils/progress-turn';
 import { type ShellState, previousSurfaceShellState, recordSurfaceShellState, treeSurfaceIds, workspaceShellState } from './utils/surface-shell-state';
 import { DEFAULT_DEV_PORTS, mergeDevPorts, matchDevPorts, firstNewDevPort } from './dev-ports';
@@ -1167,6 +1167,7 @@ export default function App() {
             browserHistory: ws.browserHistory,
             browserWidth: ws.browserWidth,
             explorerOpen: ws.explorerOpen,
+            explorerDismissed: ws.explorerDismissed,
             explorerWidth: ws.explorerWidth,
             explorerExpanded: ws.explorerExpanded,
             explorerShowHidden: ws.explorerShowHidden,
@@ -1222,13 +1223,17 @@ export default function App() {
   // must be pure, and StrictMode double-invokes it — which made one toggle
   // write the workspace twice.
   //
-  // Under `explorerOpenByDefault` nothing is persisted: the pref already says
-  // "open", and writing `explorerOpen: false` would re-fire the restore effect
-  // below and reopen the panel the same frame it was closed.
+  // Under `explorerOpenByDefault` the toggle writes `explorerDismissed`, not
+  // `explorerOpen`: the pref already says "open", and a close the user made
+  // must survive the next workspace switch and restart (#320 — before, the
+  // panel came back every time it was dismissed).
   const handleToggleExplorer = useCallback((next?: boolean) => {
     const value = next ?? !explorerOpen;
     setExplorerOpen(value);
-    if (activeWorkspaceId && !useStore.getState().workspacePrefs.explorerOpenByDefault) {
+    if (!activeWorkspaceId) return;
+    if (useStore.getState().workspacePrefs.explorerOpenByDefault) {
+      updateWorkspaceMetadata(activeWorkspaceId, { explorerDismissed: !value });
+    } else {
       updateWorkspaceMetadata(activeWorkspaceId, { explorerOpen: value });
     }
   }, [explorerOpen, activeWorkspaceId, updateWorkspaceMetadata]);
@@ -1239,15 +1244,20 @@ export default function App() {
   // dep would sample `undefined` once and never re-fire since the id didn't
   // change again.
   //
-  // With `explorerOpenByDefault` on, EVERY workspace shows the explorer —
-  // including one whose panel was closed in an earlier session: the pref is the
-  // answer, not the remembered toggle. Closing it hides it until the next
-  // workspace switch; turning the pref off is how it goes away everywhere, and
-  // then each workspace's own remembered state applies as before.
+  // With `explorerOpenByDefault` on, a workspace shows the explorer unless the
+  // user dismissed it there — and only once one of its terminals has a working
+  // directory: before that the panel can show nothing but "this pane has not
+  // reported a working directory yet" (#320). Opening it by hand still works
+  // anywhere. Off, each workspace's own remembered state applies as before.
   const explorerOpenByDefault = useStore((s) => s.workspacePrefs.explorerOpenByDefault);
+  const workspaceHasRoot = useStore((s) => {
+    const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
+    return !!ws && workspaceHasTerminalCwd(ws.splitTree);
+  });
   useEffect(() => {
-    setExplorerOpen(explorerOpenByDefault || !!activeWorkspace?.explorerOpen);
-  }, [activeWorkspaceId, activeWorkspace?.explorerOpen, explorerOpenByDefault]);
+    const byDefault = explorerOpenByDefault && workspaceHasRoot && !activeWorkspace?.explorerDismissed;
+    setExplorerOpen(byDefault || !!activeWorkspace?.explorerOpen);
+  }, [activeWorkspaceId, activeWorkspace?.explorerOpen, activeWorkspace?.explorerDismissed, explorerOpenByDefault, workspaceHasRoot]);
 
   useEffect(() => {
     if (!activeWorkspace) return;
@@ -1336,6 +1346,7 @@ export default function App() {
         browserHistory: ws.browserHistory,
         browserWidth: ws.browserWidth,
         explorerOpen: ws.explorerOpen,
+        explorerDismissed: ws.explorerDismissed,
         explorerWidth: ws.explorerWidth,
         explorerExpanded: ws.explorerExpanded,
         explorerShowHidden: ws.explorerShowHidden,

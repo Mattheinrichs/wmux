@@ -378,7 +378,7 @@ export default function WorkspaceSettings() {
       <p className="settings-hint">
         {t(
           'settings.workspacePanel.explorerOpenByDefaultHint',
-          'Opens the file explorer on the right of every workspace, with live +/- line counts per file and the files your agent is editing. Works in any folder: a git repo is compared to its last commit, any other folder to how it looked when the panel opened. Closing it hides it until you switch workspace; turn this off to hide it everywhere.',
+          'Opens the file explorer on the right of every workspace, with live +/- line counts per file and the files your agent is editing. Works in any folder: a git repo is compared to its last commit, any other folder to how it looked when the panel opened. Closing it in a workspace keeps it closed there; turn this off to hide it everywhere. A workspace whose terminals have not reported a folder yet does not open it.',
         )}
       </p>
 

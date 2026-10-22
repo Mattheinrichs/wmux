@@ -426,6 +426,12 @@ export interface WorkspaceInfo {
   browserHistory?: BrowserHistory;
   browserWidth?: number;
   explorerOpen?: boolean;
+  /**
+   * The user closed the explorer while `explorerOpenByDefault` was on (#320).
+   * That pref otherwise reopens the panel on every workspace switch, so the
+   * close is remembered separately from `explorerOpen`; reopening clears it.
+   */
+  explorerDismissed?: boolean;
   explorerWidth?: number;
   /** Expanded dirs by root path, POSIX separators. Capped at 8 roots, LRU. */
   explorerExpanded?: Record<string, string[]>;
@@ -574,6 +580,7 @@ export interface SavedSession {
     // Declared here for the same reason browserWidth is: #145 was a save path
     // quietly dropping fields the type never mentioned.
     explorerOpen?: boolean;
+    explorerDismissed?: boolean;
     explorerWidth?: number;
     explorerExpanded?: Record<string, string[]>;
     explorerShowHidden?: boolean;

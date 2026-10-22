@@ -37,6 +37,7 @@ export interface SessionData {
       // Same lifecycle as browserWidth: written by the renderer, and dropped
       // by backupAutoSession until the interface named it (#145).
       explorerOpen?: boolean;
+      explorerDismissed?: boolean;
       explorerWidth?: number;
       explorerExpanded?: Record<string, string[]>;
       explorerShowHidden?: boolean;
@@ -157,6 +158,7 @@ function backupAutoSession(previousVersion: string): void {
         browserHistory: w.browserHistory,
         browserWidth: w.browserWidth,
         explorerOpen: w.explorerOpen,
+        explorerDismissed: w.explorerDismissed,
         explorerWidth: w.explorerWidth,
         explorerExpanded: w.explorerExpanded,
         explorerShowHidden: w.explorerShowHidden,
@@ -440,6 +442,7 @@ export function writeSessionSnapshot(data: SessionData, at: number = Date.now())
         browserHistory: w.browserHistory,
         browserWidth: w.browserWidth,
         explorerOpen: w.explorerOpen,
+        explorerDismissed: w.explorerDismissed,
         explorerWidth: w.explorerWidth,
         explorerExpanded: w.explorerExpanded,
         explorerShowHidden: w.explorerShowHidden,

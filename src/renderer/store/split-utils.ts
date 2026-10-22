@@ -328,6 +328,19 @@ export function collectActiveTerminalSurfaceIds(tree: SplitNode): SurfaceId[] {
   ];
 }
 
+/**
+ * Whether any terminal in the tree has a directory the explorer could list —
+ * the spawn `cwd` or the one shell integration reported. The explorer roots on
+ * a terminal's cwd, so without one it can only show its "no working directory"
+ * message, and opening it unasked is just noise (#320).
+ */
+export function workspaceHasTerminalCwd(tree: SplitNode): boolean {
+  if (tree.type === 'leaf') {
+    return tree.surfaces.some((s) => s.type === 'terminal' && !!(s.currentCwd || s.cwd));
+  }
+  return workspaceHasTerminalCwd(tree.children[0]) || workspaceHasTerminalCwd(tree.children[1]);
+}
+
 // ─── freezeSurfaceCwds (issue #134: save/restore per-terminal directory) ─────
 // Rewrite every surface's spawn `cwd` to the directory it is *actually* sitting
 // in, for the copy of the tree that goes into a saved session.
