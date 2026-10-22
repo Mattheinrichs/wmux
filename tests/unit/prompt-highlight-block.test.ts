@@ -162,6 +162,25 @@ describe('the prompt block is the prompt’s own text', () => {
     expect(block!.startCol).toBe(rows[0].indexOf('https'));
   });
 
+  it('wraps a prompt inside the chat column beside a right sidebar', () => {
+    const rows = [
+      '│  a very long prompt line that       │ Session title',
+      '│  continues on the next row          │ 12k tokens',
+    ];
+    const { term } = fakeTerminal(rows);
+    const block = locatePromptBlock(term, 0, 'a very long prompt line that continues on the next row');
+
+    expect(block).not.toBeNull();
+    expect(block!.rows).toBe(2);
+    expect(block!.endCol).toBeLessThan(rows[0].indexOf('│ Session'));
+    expect(block!.endCol).toBeLessThan(rows[1].indexOf('│ 12k'));
+  });
+
+  it('still refuses a row that diverges mid-text', () => {
+    const { term } = fakeTerminal(['│  fix the cat', '│  bug']);
+    expect(locatePromptBlock(term, 0, 'fix the bug')).toBeNull();
+  });
+
   it('answers null when the rows do not carry the prompt', () => {
     const { term } = fakeTerminal(['│  something else entirely']);
     expect(locatePromptBlock(term, 0, PROMPT)).toBeNull();
@@ -187,6 +206,20 @@ describe('a live prompt can be refined to its echo above', () => {
     openMarkAt(term, SURFACE, 'e1', 1);
     expect(refineMarkAbove(term, SURFACE, 'e1', PROMPT, 1)).toBeNull();
     expect(lineOf(SURFACE, 'e1')).toBe(1);
+  });
+
+  it('does not settle on the previous turn’s identical prompt', () => {
+    const rows = [
+      `│  ${PROMPT}`,
+      '  done.',
+      '  (this turn’s echo not painted yet)',
+      `> ${PROMPT}`,
+    ];
+    const { term } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e0', 0);
+    openMarkAt(term, SURFACE, 'e1', 3);
+    expect(refineMarkAbove(term, SURFACE, 'e1', PROMPT, 3)).toBeNull();
+    expect(lineOf(SURFACE, 'e1')).toBe(3);
   });
 
   it('answers null when no echo is above yet', () => {

@@ -277,7 +277,16 @@ export function refineMarkAbove(
   if (!buildNeedle(text)) return null;
 
   const buf = terminal.buffer.active;
-  const lowest = Math.max(0, before - REFINE_BACK_ROWS);
+  // Never search at or above an EARLIER prompt's mark. Re-sending the same text
+  // ("continue", "run the tests again") is common, and while this turn's echo
+  // is not painted yet the nearest match above the composer is the previous
+  // turn's — settling there would tint and anchor last turn's question.
+  let floor = 0;
+  for (const [id, other] of marks.get(surfaceId) ?? []) {
+    const line = other.marker.line;
+    if (id !== entryId && line >= 0 && line < before) floor = Math.max(floor, line + 1);
+  }
+  const lowest = Math.max(floor, before - REFINE_BACK_ROWS);
   const highest = Math.min(before - 1, buf.baseY + terminal.rows - 1);
   for (let line = highest; line >= lowest; line--) {
     // The block matcher is what makes a WRAPPED first line findable: a row can
@@ -426,7 +435,8 @@ export function locatePromptBlock(
  *
  * Continuation rows restart a little to the left of the first row's column:
  * wrapped text keeps its indent, but a hard newline may be indented by the TUI
- * differently, and a couple of cells of slack costs nothing.
+ * differently, and a couple of cells of slack costs nothing. Where a row
+ * stops — the text's end, or the chat column's edge — is `consumeRow`'s call.
  */
 function consumeBlock(
   terminal: Terminal,
@@ -434,42 +444,77 @@ function consumeBlock(
   startCol: number,
   chars: string,
 ): PromptBlock | null {
-  let ptr = 0;
-  let start = -1;
-  let end = -1;
-  let endLine = from;
+  const span = { ptr: 0, start: -1, end: -1, endLine: from };
+  const continuationCol = Math.max(0, startCol - 2);
 
   for (let offset = 0; offset < MAX_HIGHLIGHT_ROWS; offset++) {
     const raw = lineText(terminal, from + offset);
     if (!raw) continue;
-
-    let i = offset === 0 ? startCol : Math.max(0, startCol - 2);
-    while (i < raw.length) {
-      if (ptr === chars.length) break;
-      const ch = raw[i];
-      if (/\s/.test(ch)) { i++; continue; }
-      if (ptr === 0 && isBoxChar(ch) && chars[ptr] !== ch.toLowerCase()) { i++; continue; }
-      if (ch.toLowerCase() !== chars[ptr]) return null;
-      if (start < 0) start = i;
-      if (i >= end) {
-        end = i;
-        endLine = from + offset;
-      }
-      ptr++;
-      i++;
-    }
-
-    if (ptr === chars.length) {
-      return { line: from, rows: offset + 1, startCol: start, endCol: end, endLine };
+    const row = consumeRow(raw, offset === 0 ? startCol : continuationCol, chars, span.ptr);
+    if (!row) return null;
+    extendSpan(span, row, from + offset);
+    if (span.ptr === chars.length) {
+      return { line: from, rows: offset + 1, startCol: span.start, endCol: span.end, endLine: span.endLine };
     }
   }
 
   // A prompt longer than the band may cover is still a prompt: keep the block
   // it managed to verify, capped, rather than dropping the highlight entirely.
-  if (ptr > 0 && start >= 0) {
-    return { line: from, rows: MAX_HIGHLIGHT_ROWS, startCol: start, endCol: end, endLine };
+  if (span.ptr === 0 || span.start < 0) return null;
+  return { line: from, rows: MAX_HIGHLIGHT_ROWS, startCol: span.start, endCol: span.end, endLine: span.endLine };
+}
+
+/** Fold one consumed row into the block's running extent. */
+function extendSpan(
+  span: { ptr: number; start: number; end: number; endLine: number },
+  row: { ptr: number; first: number; last: number },
+  line: number,
+): void {
+  span.ptr = row.ptr;
+  if (span.start < 0) span.start = row.first;
+  if (row.last >= 0 && row.last >= span.end) {
+    span.end = row.last;
+    span.endLine = line;
   }
-  return null;
+}
+
+/**
+ * Consume one row of the prompt's character stream, starting at column `i`.
+ *
+ * A mismatch is not always a divergence. A soft-wrapped row ENDS at the chat
+ * column's edge, and in a layout with a sidebar on the right the row goes on
+ * past that edge with the sidebar's own text. So once this row has matched
+ * something, a mismatch behind a gap (two or more blanks) or on a border glyph
+ * is the column boundary: the row is done and the stream continues below. A
+ * mismatch anywhere else is a different text, and answers null.
+ */
+function consumeRow(
+  raw: string,
+  i: number,
+  chars: string,
+  ptr: number,
+): { ptr: number; first: number; last: number } | null {
+  let first = -1;
+  let last = -1;
+  let gap = 0;
+  for (; i < raw.length && ptr < chars.length; i++) {
+    const ch = raw[i];
+    if (/\s/.test(ch)) {
+      gap++;
+      continue;
+    }
+    const matches = ch.toLowerCase() === chars[ptr];
+    if (!matches && ptr === 0 && isBoxChar(ch)) continue;
+    if (!matches) {
+      const columnEdge = last >= 0 && (gap >= 2 || isBoxChar(ch));
+      return columnEdge ? { ptr, first, last } : null;
+    }
+    if (first < 0) first = i;
+    last = i;
+    gap = 0;
+    ptr++;
+  }
+  return { ptr, first, last };
 }
 
 /** The vertical borders TUI layouts draw around their regions. */
@@ -557,6 +602,75 @@ export interface HighlightResult {
    * anchoring to it would hold the composer while the answer streams below.
    */
   settled: boolean;
+}
+
+/**
+ * What a band for this mark would be: its block, its height, and whether it is
+ * on the prompt's text (`onTheRow`) and clear of the live composer (`settled`).
+ * Pure: nothing is registered here, so `applyHighlight` stays the one writer.
+ */
+function decideBand(terminal: Terminal, record: MarkRecord, options: HighlightOptions) {
+  const block = options.text ? locatePromptBlock(terminal, record.marker.line, options.text) : null;
+  // The composer grows UPWARD from the cursor, so "above the cursor" is not a
+  // live test on its own: the first row of a multi-line prompt is above it. A
+  // block is live when it CONTAINS or reaches the cursor, which is true for the
+  // whole composer and false for the echo above it.
+  const live = cursorLine(terminal);
+  const deferred = block !== null && block.line + block.rows - 1 >= live;
+  const settled = options.text ? block !== null && !deferred : true;
+  const height = Math.max(1, Math.min(MAX_HIGHLIGHT_ROWS, block?.rows ?? (Math.floor(options.rows) || 1)));
+  const needle = options.needle ?? null;
+  // An uncheckable prompt falls back to what the SOURCE can promise: a shell's
+  // row is named by OSC 133, an agent's is a guess.
+  //
+  // When the caller supplied the text, the block match IS the check: a wrapped
+  // first line is deliberately allowed to span rows, which a single-row needle
+  // cannot see.
+  const found = needle && !options.text
+    ? needleRow(terminal, record.marker.line, height, needle)
+    : null;
+  const sourceVouches = options.confirmed !== false;
+  let onTheRow: boolean;
+  if (options.text) onTheRow = settled && (needle !== null || sourceVouches);
+  else onTheRow = needle ? found !== null : sourceVouches;
+  return { block, settled, height, needle, found, onTheRow };
+}
+
+/**
+ * The columns a band covers: the matched block's own cells, or the full row
+ * when there is no block (a shell prompt, or a ruler-only tick).
+ *
+ * The rail lives in CSS, inset 4px from the decoration's left edge, so the
+ * decoration starts one cell before the text. That keeps the rail in the
+ * margin a TUI leaves there instead of covering the first glyph.
+ */
+function bandColumns(terminal: Terminal, block: PromptBlock | null): { x: number; width: number } {
+  if (!block) return { x: 0, width: terminal.cols };
+  const startCell = cellColumnAt(terminal, block.line, block.startCol);
+  const endCell = cellColumnAt(terminal, block.endLine, block.endCol, true);
+  const x = Math.max(0, startCell - 1);
+  return { x, width: Math.max(1, Math.min(terminal.cols - x, endCell - x + 1)) };
+}
+
+/**
+ * The render-time re-check. A block band compares one row slice (see
+ * `blockCheck`); a needle band re-runs the needle on the row it matched. A band
+ * whose tint rests on the caller's word has nothing to check and stays.
+ */
+function stillOnTheRow(
+  terminal: Terminal,
+  record: MarkRecord,
+  needleCheck: { needle: string | null; found: number | null } | null,
+): boolean {
+  if (!needleCheck) {
+    const check = record.blockCheck;
+    if (!check?.text) return false;
+    const row = lineText(terminal, record.marker.line);
+    return row.slice(check.start, check.start + check.text.length) === check.text;
+  }
+  const { needle, found } = needleCheck;
+  if (!needle || found === null) return true;
+  return needleRow(terminal, record.marker.line + found, 1, needle) !== null;
 }
 
 /** Most rows one prompt highlight may cover. */
@@ -700,50 +814,19 @@ export function applyHighlight(
   if (!record || record.marker.line < 0) return { tinted: false, settled: false };
   clearHighlight(surfaceId, entryId);
 
-  const block = options.text ? locatePromptBlock(terminal, record.marker.line, options.text) : null;
-  // The composer grows UPWARD from the cursor, so "above the cursor" is not a
-  // live test on its own: the first row of a multi-line prompt is above it. A
-  // block is live when it CONTAINS or reaches the cursor, which is true for the
-  // whole composer and false for the echo above it.
-  const live = cursorLine(terminal);
-  const deferred = block !== null && block.line + block.rows - 1 >= live;
-  const settled = options.text ? block !== null && !deferred : true;
-  const height = Math.max(1, Math.min(MAX_HIGHLIGHT_ROWS, block?.rows ?? (Math.floor(options.rows) || 1)));
-  const needle = options.needle ?? null;
-  // An uncheckable prompt falls back to what the SOURCE can promise: a shell's
-  // row is named by OSC 133, an agent's is a guess.
-  //
-  // When the caller supplied the text, the block match IS the check: a wrapped
-  // first line is deliberately allowed to span rows, which a single-row needle
-  // cannot see.
-  const found = needle && !options.text
-    ? needleRow(terminal, record.marker.line, height, needle)
-    : null;
-  const onTheRow = options.text
-    ? settled && (needle !== null || options.confirmed !== false)
-    : (needle ? found !== null : options.confirmed !== false);
+  const { block, settled, height, needle, found, onTheRow } = decideBand(terminal, record, options);
   const tint = onTheRow ? blendOverBackground(options.color, backgroundOf(terminal)) : null;
   // Nothing left to draw: no band, and no tick asked for.
   if (!onTheRow && !options.ruler) return { tinted: false, settled };
 
-  record.blockCheck = block && onTheRow
+  const bounded = onTheRow ? block : null;
+  record.blockCheck = bounded
     ? {
-      start: block.startCol,
-      text: lineText(terminal, record.marker.line).slice(block.startCol, block.startCol + 24),
+      start: bounded.startCol,
+      text: lineText(terminal, record.marker.line).slice(bounded.startCol, bounded.startCol + 24),
     }
     : undefined;
-
-  // The rail lives in CSS, inset 4px from the decoration's left edge, so the
-  // decoration starts one cell before the text. That keeps the rail in the
-  // margin a TUI leaves there instead of covering the first glyph.
-  const startCell = block && onTheRow ? cellColumnAt(terminal, block.line, block.startCol) : 0;
-  const endCell = block && onTheRow
-    ? cellColumnAt(terminal, block.endLine, block.endCol, true)
-    : terminal.cols - 1;
-  const x = Math.max(0, startCell - 1);
-  const width = block && onTheRow
-    ? Math.max(1, Math.min(terminal.cols - x, endCell - x + 1))
-    : terminal.cols;
+  const { x, width } = bandColumns(terminal, bounded);
 
   try {
     const decoration = terminal.registerDecoration({
@@ -771,15 +854,7 @@ export function applyHighlight(
         element.classList.toggle('wmux-prompt-mark--css-tint', !tint);
         // Nothing to re-check when the tint rests on the caller's word rather
         // than on the row's text.
-        if (options.text) {
-          const check = record.blockCheck;
-          const row = lineText(terminal, record.marker.line);
-          if (check && check.text && row.slice(check.start, check.start + check.text.length) === check.text) return;
-        } else {
-          if (!needle || found === null) return;
-          const row = record.marker.line + found;
-          if (needleRow(terminal, row, 1, needle) !== null) return;
-        }
+        if (stillOnTheRow(terminal, record, options.text ? null : { needle, found })) return;
         // The row stopped carrying the prompt. Re-deciding means disposing this
         // decoration, which must not happen from inside xterm's own render pass
         // — it is iterating the decoration list right now. One deferred pass per
