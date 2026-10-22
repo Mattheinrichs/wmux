@@ -1626,6 +1626,8 @@ export default function App() {
         onMarkAllNotificationsRead={() => markAllRead()}
         focusMode={focusMode}
         onToggleFocusMode={() => setFocusMode((on) => !on)}
+        explorerOpen={explorerOpen}
+        onToggleExplorer={() => handleToggleExplorer()}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>

@@ -92,3 +92,13 @@ export function IconSettings({ className, size = 16 }: IconProps) {
     </svg>
   );
 }
+
+/** File explorer (#324) — an outline folder, the same glyph every editor uses
+ *  for the side panel that lists files. */
+export function IconFolder({ className, size = 16 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" strokeWidth={2} {...base} aria-hidden="true">
+      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.3l2 2.5h8.7A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" />
+    </svg>
+  );
+}

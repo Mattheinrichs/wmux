@@ -9,10 +9,12 @@ import React from 'react';
 import logoSrc from '../../../../resources/icons/icon.svg';
 import NotificationBell from './NotificationBell';
 import UpdateBadge from './UpdateBadge';
-import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus } from './icons';
+import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder } from './icons';
 import WindowControls, { useIsFramelessWindow } from './WindowControls';
 import { NotificationInfo, WorkspaceId, PaneId, SurfaceId } from '../../../shared/types';
 import { useT } from '../../i18n';
+import { useStore } from '../../store';
+import { formatBinding } from '../Settings/KeyboardSettings';
 import '../../styles/titlebar.css';
 
 interface TitlebarProps {
@@ -32,6 +34,10 @@ interface TitlebarProps {
   /** Focus mode: every pane but the focused one is dimmed. */
   focusMode?: boolean;
   onToggleFocusMode?: () => void;
+  /** File explorer of the active workspace (#324): a mouse way back to the
+   *  panel once it has been closed. */
+  explorerOpen?: boolean;
+  onToggleExplorer?: () => void;
 }
 
 export default function Titlebar({
@@ -49,8 +55,14 @@ export default function Titlebar({
   onMarkAllNotificationsRead,
   focusMode,
   onToggleFocusMode,
+  explorerOpen,
+  onToggleExplorer,
 }: TitlebarProps) {
   const t = useT();
+  // The tooltip names the CONFIGURED key, not the default: a rebound shortcut
+  // advertised as Ctrl+Shift+X would teach the user a key that does nothing.
+  const explorerBinding = formatBinding(useStore((s) => s.shortcuts.toggleExplorer));
+  const explorerLabel = t('shortcutAction.toggleExplorer', 'Toggle file explorer');
   // Clear-transparency windows are frameless and have no native caption
   // buttons, so this is where they come from.
   const frameless = useIsFramelessWindow();
@@ -105,6 +117,17 @@ export default function Titlebar({
         >
           <IconFocus />
         </button>
+        {onToggleExplorer && (
+          <button
+            className={`titlebar__btn${explorerOpen ? ' titlebar__btn--active' : ''}`}
+            onClick={onToggleExplorer}
+            title={explorerBinding ? `${explorerLabel} (${explorerBinding})` : explorerLabel}
+            aria-label={explorerLabel}
+            aria-pressed={!!explorerOpen}
+          >
+            <IconFolder />
+          </button>
+        )}
       </div>
       <span className="titlebar__title">{title ?? ''}</span>
       <div className="titlebar__right">
