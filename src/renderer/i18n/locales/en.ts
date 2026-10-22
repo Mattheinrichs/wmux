@@ -505,6 +505,8 @@ export const en = {
   'settings.sidebarPanel.indicator.leftRail': 'Left Rail',
   'settings.sidebarPanel.indicator.solidFill': 'Solid Fill',
   'settings.sidebarPanel.backgroundOpacity': 'Background opacity',
+  'settings.sidebarPanel.textScale': 'Text size',
+  'settings.sidebarPanel.textScaleHint': 'Scales the workspace titles, status lines, paths and agent lines. The terminal font size is not affected.',
   // Settings — Terminal panel
   'settings.terminalPanel.font': 'Font',
   'settings.terminalPanel.customStack': 'Custom stack…',

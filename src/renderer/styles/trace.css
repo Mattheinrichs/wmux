@@ -228,7 +228,7 @@
 :root[data-ui-mode='trace'] .workspace-row__session-tool {
   color: var(--tr-chan, var(--ui-text-muted));
   font-family: 'Cascadia Mono', 'Consolas', monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--sidebar-text-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -264,7 +264,7 @@
  */
 :root[data-ui-mode='trace'] .workspace-row__odometer {
   font-family: 'Cascadia Mono', 'Consolas', monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--sidebar-text-scale, 1));
   font-variant-numeric: tabular-nums;
   color: var(--tr-current);
   opacity: 0.75;
@@ -321,7 +321,7 @@
 }
 
 :root[data-ui-mode='trace'] .workspace-row__title {
-  font-size: 12px;
+  font-size: calc(12px * var(--sidebar-text-scale, 1));
   line-height: 1.2;
 }
 
@@ -329,7 +329,7 @@
    with a 2px lead, for text that is usually two words. In TRACE it becomes a
    caption under the title rather than a second paragraph. */
 :root[data-ui-mode='trace'] .workspace-row__status {
-  font-size: 10px;
+  font-size: calc(10px * var(--sidebar-text-scale, 1));
   line-height: 1.2;
   margin-top: 0;
 }

@@ -1,4 +1,5 @@
 import { useStore } from '../../store';
+import { sidebarTextScale, SIDEBAR_TEXT_SCALE_MAX, SIDEBAR_TEXT_SCALE_MIN } from '../../store/settings-slice';
 import { useT } from '../../i18n';
 
 export default function SidebarSettings() {
@@ -124,6 +125,25 @@ export default function SidebarSettings() {
           value={sidebarPrefs.backgroundOpacity}
           onChange={(e) => setSidebarPrefs({ backgroundOpacity: Number(e.target.value) })}
         />
+      </div>
+
+      <div className="settings-row settings-row--column">
+        <div className="settings-row-header">
+          <label className="settings-label">{t('settings.sidebarPanel.textScale', 'Text size')}</label>
+          <span className="settings-value">{Math.round(sidebarTextScale(sidebarPrefs.textScale) * 100)}%</span>
+        </div>
+        <input
+          type="range"
+          className="settings-slider"
+          min={SIDEBAR_TEXT_SCALE_MIN}
+          max={SIDEBAR_TEXT_SCALE_MAX}
+          step={5}
+          value={Math.round(sidebarTextScale(sidebarPrefs.textScale) * 100)}
+          onChange={(e) => setSidebarPrefs({ textScale: Number(e.target.value) })}
+        />
+        <p className="settings-hint">
+          {t('settings.sidebarPanel.textScaleHint', 'Scales the workspace titles, status lines, paths and agent lines. The terminal font size is not affected.')}
+        </p>
       </div>
     </div>
   );

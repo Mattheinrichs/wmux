@@ -11,6 +11,7 @@ import type { AgentRosterEntry } from '../../store/agent-rollup';
 import { DropEdge, edgeForPointer, reorderByDrop } from './reorder';
 import ErrorBoundary from '../ErrorBoundary';
 import { useStore } from '../../store';
+import { sidebarTextScale } from '../../store/settings-slice';
 import { useT } from '../../i18n';
 import '../../styles/sidebar.css';
 import '../../styles/trace.css';
@@ -73,6 +74,7 @@ export default function Sidebar({
   onOpenAgentNavigator,
 }: SidebarProps) {
   const t = useT();
+  const textScale = useStore((s) => sidebarTextScale(s.sidebarPrefs.textScale));
   const [draggedId, setDraggedId] = useState<WorkspaceId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: WorkspaceId; edge: DropEdge } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -262,7 +264,12 @@ export default function Sidebar({
   );
 
   return (
-    <div className="sidebar" style={{ width: sidebarWidth }}>
+    <div
+      className="sidebar"
+      // The custom property, not a `zoom`: zoom would scale the resizable
+      // width and every icon too, while #319 asks for the TEXT only.
+      style={{ width: sidebarWidth, '--sidebar-text-scale': textScale } as React.CSSProperties}
+    >
       {/* Spacer for titlebar area + collapse button */}
       <div className="sidebar__header">
         {onCollapse && (

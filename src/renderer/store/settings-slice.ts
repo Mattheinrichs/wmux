@@ -418,6 +418,26 @@ export interface SidebarPrefs {
   hideAllDetails: boolean;
   activeTabIndicator: 'leftRail' | 'solidFill';
   backgroundOpacity: number; // 0–100
+  /**
+   * Sidebar text size as a percentage of the shipped sizes (#319), independent
+   * of the terminal font. Applied as `--sidebar-text-scale`, which every
+   * font-size in sidebar.css multiplies by. 100 is the shipped look.
+   */
+  textScale: number;
+}
+
+export const SIDEBAR_TEXT_SCALE_MIN = 90;
+export const SIDEBAR_TEXT_SCALE_MAX = 150;
+
+/**
+ * The scale factor to apply, from a stored percentage. The value comes from
+ * localStorage, so anything that is not a finite number in range is clamped
+ * or falls back to 1 rather than collapsing the sidebar's text.
+ */
+export function sidebarTextScale(percent: unknown): number {
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) return 1;
+  const clamped = Math.min(SIDEBAR_TEXT_SCALE_MAX, Math.max(SIDEBAR_TEXT_SCALE_MIN, percent));
+  return clamped / 100;
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
@@ -429,6 +449,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   hideAllDetails: false,
   activeTabIndicator: 'leftRail',
   backgroundOpacity: 100,
+  textScale: 100,
 };
 
 // ─── Workspace settings ───────────────────────────────────────────────────────

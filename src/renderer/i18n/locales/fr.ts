@@ -431,6 +431,8 @@ export const fr: Translation = {
   'settings.sidebarPanel.indicator.leftRail': 'Rail gauche',
   'settings.sidebarPanel.indicator.solidFill': 'Remplissage plein',
   'settings.sidebarPanel.backgroundOpacity': "Opacité de l'arrière-plan",
+  'settings.sidebarPanel.textScale': 'Taille du texte',
+  'settings.sidebarPanel.textScaleHint': "Agrandit les titres d'espaces de travail, les lignes d'état, les chemins et les lignes d'agent. La taille de police du terminal n'est pas modifiée.",
   // Paramètres — Panneau Terminal
   'settings.terminalPanel.font': 'Police',
   'settings.terminalPanel.customStack': 'Pile personnalisée…',
