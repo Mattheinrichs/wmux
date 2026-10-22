@@ -23,6 +23,7 @@ vi.mock('electron', () => ({
 
 import {
   isPortableZipInstall,
+  isScoopManagedInstall,
   pickZipAsset,
   findPayloadRoot,
   buildApplyUpdateCmd,
@@ -40,6 +41,31 @@ import { app } from 'electron';
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'wmux-zip-'));
 }
+
+describe('isScoopManagedInstall (#321)', () => {
+  it('is true where Scoop left its manifest.json and install.json', () => {
+    const root = tempDir();
+    fs.writeFileSync(path.join(root, 'wmux.exe'), '');
+    fs.writeFileSync(path.join(root, 'manifest.json'), '{}');
+    fs.writeFileSync(path.join(root, 'install.json'), '{}');
+    expect(isScoopManagedInstall(root)).toBe(true);
+    // The zip-extract shape matches too, which is exactly why Scoop is
+    // checked first: the in-place updater must not run here.
+    expect(isPortableZipInstall(root)).toBe(true);
+  });
+
+  it('is false for a plain zip extract, or with only one of the two files', () => {
+    const root = tempDir();
+    fs.writeFileSync(path.join(root, 'wmux.exe'), '');
+    expect(isScoopManagedInstall(root)).toBe(false);
+    fs.writeFileSync(path.join(root, 'manifest.json'), '{}');
+    expect(isScoopManagedInstall(root)).toBe(false);
+  });
+
+  it('is false for an empty path', () => {
+    expect(isScoopManagedInstall('')).toBe(false);
+  });
+});
 
 describe('isPortableZipInstall', () => {
   it('is true for a folder that has wmux.exe and no NSIS uninstaller', () => {

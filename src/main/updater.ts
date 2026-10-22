@@ -6,6 +6,7 @@ import { IPC_CHANNELS, type UpdateTriggerResult } from '../shared/types';
 import { fetchLatestRelease, compareVersions, releasePageUrl } from './update-checker';
 import {
   isPortableZipInstall,
+  isScoopManagedInstall,
   resolvePortableZipTarget,
   runPortableZipUpdate,
   applyStagedPortableUpdate,
@@ -80,6 +81,28 @@ function currentInstallIsPortable(): boolean {
   const exe = app.getPath('exe');
   if (!exe) return false;
   return isPortableZipInstall(path.dirname(exe));
+}
+
+function currentInstallIsScoop(): boolean {
+  if (!app.isPackaged) return false;
+  const exe = app.getPath('exe');
+  return !!exe && isScoopManagedInstall(path.dirname(exe));
+}
+
+/**
+ * A Scoop install updates through Scoop (#321): the in-place zip path would
+ * overwrite `apps/wmux/<version>/` behind Scoop's back. The click still gets an
+ * answer, not a release page offering a zip the user should not unpack there.
+ */
+function tellScoopUser(): UpdateTriggerResult {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'wmux update',
+    message: 'This copy of wmux is managed by Scoop.',
+    detail: 'Update it with:\n\n    scoop update wmux\n\nthen restart wmux.',
+    buttons: ['OK'],
+  }).catch(() => { /* the answer is informational; a dismissed dialog loses nothing */ });
+  return { handled: true };
 }
 
 // ── In-app install, driven by the badge (issue #125) ─────────────────────────
@@ -223,6 +246,7 @@ export function canSelfUpdate(): boolean {
  */
 export async function requestUpdateNow(): Promise<UpdateTriggerResult> {
   if (!canSelfUpdate()) return { handled: false, reason: 'not_supported' };
+  if (currentInstallIsScoop()) return tellScoopUser();
 
   // Already downloaded — this click is the install confirmation. That holds
   // only once the dialog is no longer asking: a finished download sets `ready`
@@ -284,7 +308,11 @@ export async function requestUpdateNow(): Promise<UpdateTriggerResult> {
   if (currentInstallIsPortable()) {
     return requestPortableZipUpdate();
   }
+  return requestNsisUpdate();
+}
 
+/** The NSIS install's user-driven check + download, via electron-updater. */
+async function requestNsisUpdate(): Promise<UpdateTriggerResult> {
   userDriven = true;
   setState({ phase: 'checking', percent: 0, message: undefined });
   try {

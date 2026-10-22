@@ -294,3 +294,31 @@ jobs:
             latest.yml
           draft: false
           generate_release_notes: true
+
+      # ── Scoop bucket (#321) ────────────────────────────────
+      # The repo is its own Scoop bucket (bucket/wmux.json). A custom bucket has
+      # no Excavator bot, so the manifest is bumped here, from the zip that was
+      # just uploaded, and committed to master. Only for a real tag push: a
+      # manual re-run of an older tag must not move the bucket backwards.
+      # continue-on-error: the release is already published; a push race with
+      # another commit must not mark it failed — re-run this step, or run the
+      # script by hand.
+      - name: Update Scoop manifest
+        if: ${{ github.event_name == 'push' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          VER='${{ steps.version.outputs.version }}'
+          ZIP="$PWD/wmux-$VER-win-x64.zip"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin master
+          git checkout -B master origin/master
+          node scripts/update-scoop-manifest.mjs "$VER" "$ZIP"
+          if git diff --quiet -- bucket/wmux.json; then
+            echo 'bucket/wmux.json already at this version'
+            exit 0
+          fi
+          git add bucket/wmux.json
+          git commit -m "chore(scoop): bucket manifest for $VER"
+          git push origin master

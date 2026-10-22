@@ -72,6 +72,23 @@ export function isPortableZipInstall(installRoot: string): boolean {
   return !fs.existsSync(path.join(root, UNINSTALLER_NAME));
 }
 
+/**
+ * Whether Scoop owns this install (#321). Scoop extracts the release zip into
+ * `apps/wmux/<version>/` and writes its own `manifest.json` and `install.json`
+ * beside the files, so the zip-extract shape above matches it too. An in-place
+ * update there would leave Scoop believing the old version is installed and
+ * fight its next `scoop update`, so a Scoop install is told to use Scoop.
+ */
+export function isScoopManagedInstall(installRoot: string): boolean {
+  if (!installRoot) return false;
+  try {
+    const root = path.resolve(installRoot);
+    return fs.existsSync(path.join(root, 'install.json')) && fs.existsSync(path.join(root, 'manifest.json'));
+  } catch {
+    return false;
+  }
+}
+
 export function pickZipAsset(assets: GithubReleaseAsset[] | undefined | null): GithubReleaseAsset | null {
   if (!assets || assets.length === 0) return null;
   const zips = assets.filter((a) => typeof a?.name === 'string' && /\.zip$/i.test(a.name));

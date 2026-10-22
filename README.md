@@ -262,6 +262,17 @@ Download [wmux-0.7.10-win-x64.zip](https://github.com/amirlehmam/wmux/releases/l
 
 > **Note:** After extracting, right-click the zip before extracting and select **Unblock** if Windows SmartScreen warns about the executable.
 
+### Scoop
+
+This repository is also a [Scoop](https://scoop.sh) bucket:
+
+```powershell
+scoop bucket add wmux https://github.com/amirlehmam/wmux
+scoop install wmux/wmux
+```
+
+Update with `scoop update wmux`. A Scoop install does not update itself in place: the update badge tells you to use Scoop instead, so Scoop always knows which version is installed. Settings and sessions live in `%APPDATA%\wmux` and survive updates.
+
 ### Updates & security
 
 wmux checks GitHub Releases for updates. Clicking the titlebar badge or the
