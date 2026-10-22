@@ -399,6 +399,7 @@ export const zhTW: Translation = {
   'explorer.truncated': '僅顯示前 {count} 個項目',
   'explorer.notViewable': 'wmux 只能開啟文字檔',
   'explorer.copyPath': '複製路徑',
+  'explorer.viewChanges': '檢視變更',
   'explorer.reveal': '在檔案總管中顯示',
   'explorer.openInApp': '以預設應用程式開啟',
   'explorer.error.no_root': '此窗格尚未回報工作目錄',

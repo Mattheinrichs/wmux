@@ -330,6 +330,7 @@ export const nl: Translation = {
   'explorer.truncated': 'De eerste {count} items worden getoond',
   'explorer.notViewable': 'wmux kan alleen tekstbestanden openen',
   'explorer.copyPath': 'Pad kopiëren',
+  'explorer.viewChanges': 'Wijzigingen bekijken',
   'explorer.reveal': 'Tonen in Verkenner',
   'explorer.openInApp': 'Openen in standaardapp',
   'explorer.error.no_root': 'Dit paneel heeft nog geen werkmap gemeld',

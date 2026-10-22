@@ -15,6 +15,8 @@ import { explorerErrorKey } from './explorer-errors';
 import { ExplorerTree } from './ExplorerTree';
 import { openInPreviewTab } from './open-preview';
 import { useExplorerDiff } from './use-explorer-diff';
+import { statFor } from './explorer-diff';
+import { openDiffView } from '../Diff/open-diff';
 import '../../styles/explorer.css';
 import type { PaneId, SurfaceId } from '../../../shared/types';
 
@@ -410,6 +412,16 @@ export function ExplorerPanel({ onClose, focusedPaneId }: ExplorerPanelProps): R
     );
   }, [surfaceId]);
 
+  // Open (or focus) the Diff view for THIS root, optionally on one file (#325).
+  // `absRoot` rather than the reported cwd: it is what the +N/-N column was
+  // computed against, so the tab lists exactly the files the tree marked.
+  // A folder row opens the view unselected — it has no single file to show.
+  const viewChanges = useCallback((row: ExplorerRow | null) => {
+    if (!activeWorkspaceId || !absRoot) return;
+    const file = row && row.entry.kind === 'file' ? row.relPath : null;
+    openDiffView(useStore.getState(), activeWorkspaceId, focusedPaneId, absRoot, file);
+  }, [activeWorkspaceId, focusedPaneId, absRoot]);
+
   const rootLabel = absRoot ? (absRoot.split(/[\\/]/).filter(Boolean).pop() ?? absRoot) : '';
 
   return (
@@ -445,7 +457,12 @@ export function ExplorerPanel({ onClose, focusedPaneId }: ExplorerPanelProps): R
           A column of numbers that silently means one or the other is a column
           the user cannot act on. */}
       {diff.total.files > 0 && (
-        <div className="explorer-panel__diffbar">
+        <button
+          type="button"
+          className="explorer-panel__diffbar"
+          title={t('shortcutAction.openDiffPanel', 'Open diff panel')}
+          onClick={() => viewChanges(null)}
+        >
           <span className="explorer-panel__diffbar-count">
             {t('explorer.changedFiles', '{count} changed')
               .replace('{count}', String(diff.total.files))}
@@ -468,7 +485,7 @@ export function ExplorerPanel({ onClose, focusedPaneId }: ExplorerPanelProps): R
               ? t('explorer.baselineGit', 'vs HEAD')
               : t('explorer.baselineSnapshot', 'this session')}
           </span>
-        </div>
+        </button>
       )}
       <div className="explorer-panel__body">
         {error && (
@@ -487,6 +504,8 @@ export function ExplorerPanel({ onClose, focusedPaneId }: ExplorerPanelProps): R
             onContextMenu={handleContextMenu}
             diffStats={diff.stats}
             touched={diff.touched}
+            onViewChanges={viewChanges}
+            viewChangesLabel={t('explorer.viewChanges', 'View changes')}
           />
         )}
         {truncated && (
@@ -519,6 +538,17 @@ export function ExplorerPanel({ onClose, focusedPaneId }: ExplorerPanelProps): R
           >
             {t('explorer.copyPath', 'Copy path')}
           </div>
+          {/* Only on a row the diff actually lists — a "View changes" that
+              opens an empty diff is a dead menu item by another name. */}
+          {contextMenu.row.entry.kind === 'file' && statFor(diff.stats, contextMenu.row.relPath) && (
+            <div
+              className="ctx-menu__item"
+              role="menuitem"
+              onClick={() => { viewChanges(contextMenu.row); closeContextMenu(); }}
+            >
+              {t('explorer.viewChanges', 'View changes')}
+            </div>
+          )}
           {/* Enabled for EVERY entry — folders and binaries included. Reveal
               only selects the item in Explorer, and "open in the default app"
               is the one action that is MORE useful on a file wmux cannot

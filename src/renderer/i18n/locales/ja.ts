@@ -341,6 +341,7 @@ export const ja: Translation = {
   'explorer.truncated': '最初の {count} 件を表示しています',
   'explorer.notViewable': 'wmux はテキストファイルのみ開けます',
   'explorer.copyPath': 'パスをコピー',
+  'explorer.viewChanges': '変更を表示',
   'explorer.reveal': 'エクスプローラーで表示',
   'explorer.openInApp': '既定のアプリで開く',
   'explorer.error.no_root': 'このペインはまだ作業ディレクトリを報告していません',

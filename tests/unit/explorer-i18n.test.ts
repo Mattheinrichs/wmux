@@ -45,7 +45,7 @@ describe('explorer translations', () => {
     'shortcutAction.toggleExplorer', 'surfaceLabel.code',
     'explorer.title', 'explorer.refresh', 'explorer.showHidden', 'explorer.hideHidden',
     'explorer.close', 'explorer.empty', 'explorer.truncated', 'explorer.notViewable',
-    'explorer.copyPath', 'explorer.reveal', 'explorer.openInApp',
+    'explorer.copyPath', 'explorer.reveal', 'explorer.openInApp', 'explorer.viewChanges',
     ...CODES.map((c) => explorerErrorKey(c)),
     'code.error.not_found', 'code.error.read_failed',
     // Change counts in the tree.

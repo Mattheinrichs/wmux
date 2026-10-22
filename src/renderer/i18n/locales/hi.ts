@@ -341,6 +341,7 @@ export const hi: Translation = {
   'explorer.truncated': 'पहली {count} प्रविष्टियाँ दिखाई जा रही हैं',
   'explorer.notViewable': 'wmux केवल टेक्स्ट फ़ाइलें खोल सकता है',
   'explorer.copyPath': 'पथ कॉपी करें',
+  'explorer.viewChanges': 'बदलाव देखें',
   'explorer.reveal': 'फ़ाइल एक्सप्लोरर में दिखाएँ',
   'explorer.openInApp': 'डिफ़ॉल्ट ऐप में खोलें',
   'explorer.error.no_root': 'इस पैन ने अभी तक कार्यशील डायरेक्टरी नहीं बताई है',

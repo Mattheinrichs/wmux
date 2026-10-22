@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useT } from '../../i18n';
+import { DIFF_SELECT_EVENT, takeDiffSelection } from './open-diff';
 import '../../styles/diff.css';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -231,6 +232,22 @@ export default function DiffPane({ surfaceId, cwd }: DiffPaneProps) {
     loadDiffRef.current(selectedFile);
     contentRef.current?.scrollTo(0, 0);
   }, [selectedFile]);
+
+  // A file picked in the explorer (#325). It may have been requested before
+  // this tab mounted — the explorer opens the tab and asks in the same click —
+  // so the pending request is read once on mount as well as on the event.
+  useEffect(() => {
+    const take = () => {
+      const file = takeDiffSelection(surfaceId);
+      if (file) setSelectedFile(file);
+    };
+    take();
+    const onSelect = (e: Event) => {
+      if ((e as CustomEvent<{ surfaceId?: string }>).detail?.surfaceId === surfaceId) take();
+    };
+    window.addEventListener(DIFF_SELECT_EVENT, onSelect);
+    return () => window.removeEventListener(DIFF_SELECT_EVENT, onSelect);
+  }, [surfaceId]);
 
   // Listen for immediate updates from Claude Code hooks (faster than polling)
   useEffect(() => {

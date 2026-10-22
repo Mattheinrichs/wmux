@@ -341,6 +341,7 @@ export const pl: Translation = {
   'explorer.truncated': 'Wyświetlono pierwsze {count} pozycji',
   'explorer.notViewable': 'wmux może otwierać tylko pliki tekstowe',
   'explorer.copyPath': 'Kopiuj ścieżkę',
+  'explorer.viewChanges': 'Pokaż zmiany',
   'explorer.reveal': 'Pokaż w Eksploratorze plików',
   'explorer.openInApp': 'Otwórz w domyślnej aplikacji',
   'explorer.error.no_root': 'Ten panel nie zgłosił jeszcze katalogu roboczego',

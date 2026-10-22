@@ -330,6 +330,7 @@ export const de: Translation = {
   'explorer.truncated': 'Die ersten {count} Einträge werden angezeigt',
   'explorer.notViewable': 'wmux kann nur Textdateien öffnen',
   'explorer.copyPath': 'Pfad kopieren',
+  'explorer.viewChanges': 'Änderungen anzeigen',
   'explorer.reveal': 'Im Datei-Explorer anzeigen',
   'explorer.openInApp': 'In Standard-App öffnen',
   'explorer.error.no_root': 'Dieses Panel hat noch kein Arbeitsverzeichnis gemeldet',

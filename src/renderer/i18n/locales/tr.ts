@@ -341,6 +341,7 @@ export const tr: Translation = {
   'explorer.truncated': 'İlk {count} öğe gösteriliyor',
   'explorer.notViewable': 'wmux yalnızca metin dosyalarını açabilir',
   'explorer.copyPath': 'Yolu kopyala',
+  'explorer.viewChanges': 'Değişiklikleri görüntüle',
   'explorer.reveal': "Dosya Gezgini'nde göster",
   'explorer.openInApp': 'Varsayılan uygulamada aç',
   'explorer.error.no_root': 'Bu bölme henüz bir çalışma dizini bildirmedi',

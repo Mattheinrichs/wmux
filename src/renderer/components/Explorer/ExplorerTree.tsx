@@ -16,6 +16,11 @@ interface ExplorerTreeProps {
   diffStats: DiffStatMap;
   /** Paths an agent's Edit/Write touched this session. Empty = no dots. */
   touched: ReadonlySet<string>;
+  /** Clicking a row's +N/-N cell opens the Diff view on it (#325). Absent =
+   *  the cell stays a plain label. */
+  onViewChanges?: (row: ExplorerRow) => void;
+  /** Tooltip for that click, already translated. */
+  viewChangesLabel?: string;
 }
 
 /**
@@ -27,11 +32,21 @@ interface ExplorerTreeProps {
  * unchanged row, which is what keeps a tree of 200 files from becoming a wall
  * of zeroes.
  */
-function DiffCell({ stat }: { stat: { additions: number; deletions: number } | null }):
-React.JSX.Element | null {
+function DiffCell({ stat, onClick, label }: {
+  stat: { additions: number; deletions: number } | null;
+  onClick?: () => void;
+  label?: string;
+}): React.JSX.Element | null {
   if (!stat || (stat.additions === 0 && stat.deletions === 0)) return null;
   return (
-    <span className="explorer-row__diff">
+    <span
+      className={`explorer-row__diff${onClick ? ' explorer-row__diff--link' : ''}`}
+      title={onClick ? label : undefined}
+      // Its own click, never the row's: a click on the NAME still opens the
+      // file, and only the numbers mean "show me what changed" (#325).
+      onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+      onDoubleClick={onClick ? (e) => e.stopPropagation() : undefined}
+    >
       {stat.additions > 0 && (
         <span className="explorer-row__diff-add">+{stat.additions}</span>
       )}
@@ -67,7 +82,7 @@ function describeRow(
 
 export function ExplorerTree({
   rows, selectedRelPath, onToggleDir, onSelect, onActivate, onContextMenu,
-  diffStats, touched,
+  diffStats, touched, onViewChanges, viewChangesLabel,
 }: ExplorerTreeProps): React.JSX.Element {
   // Roving tabIndex (ARIA tree pattern): exactly one row is a tab stop at a
   // time, everything else is -1. This is deliberately separate from
@@ -230,7 +245,11 @@ export function ExplorerTree({
               <span className="explorer-row__agent-dot" aria-hidden="true">●</span>
             )}
             <span className="explorer-row__name">{row.entry.name}</span>
-            <DiffCell stat={stat} />
+            <DiffCell
+              stat={stat}
+              onClick={onViewChanges ? () => onViewChanges(row) : undefined}
+              label={viewChangesLabel}
+            />
           </div>
         );
       })}

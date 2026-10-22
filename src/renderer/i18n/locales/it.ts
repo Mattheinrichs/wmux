@@ -330,6 +330,7 @@ export const it: Translation = {
   'explorer.truncated': 'Sono mostrate le prime {count} voci',
   'explorer.notViewable': 'wmux può aprire solo file di testo',
   'explorer.copyPath': 'Copia percorso',
+  'explorer.viewChanges': 'Mostra modifiche',
   'explorer.reveal': 'Mostra in Esplora file',
   'explorer.openInApp': "Apri nell'app predefinita",
   'explorer.error.no_root': 'Questo riquadro non ha ancora segnalato una directory di lavoro',

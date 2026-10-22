@@ -342,6 +342,7 @@ export const cs: Translation = {
   'explorer.truncated': 'Zobrazeno prvních {count} položek',
   'explorer.notViewable': 'wmux umí otevřít jen textové soubory',
   'explorer.copyPath': 'Kopírovat cestu',
+  'explorer.viewChanges': 'Zobrazit změny',
   'explorer.reveal': 'Zobrazit v Průzkumníku souborů',
   'explorer.openInApp': 'Otevřít ve výchozí aplikaci',
   'explorer.error.no_root': 'Tento panel zatím nenahlásil pracovní adresář',

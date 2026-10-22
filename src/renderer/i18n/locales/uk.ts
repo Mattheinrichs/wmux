@@ -341,6 +341,7 @@ export const uk: Translation = {
   'explorer.truncated': 'Показано перші {count} елементів',
   'explorer.notViewable': 'wmux відкриває лише текстові файли',
   'explorer.copyPath': 'Скопіювати шлях',
+  'explorer.viewChanges': 'Показати зміни',
   'explorer.reveal': 'Показати в провіднику',
   'explorer.openInApp': 'Відкрити у типовій програмі',
   'explorer.error.no_root': 'Ця панель ще не повідомила робочий каталог',

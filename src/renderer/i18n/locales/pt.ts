@@ -330,6 +330,7 @@ export const pt: Translation = {
   'explorer.truncated': 'Mostrando as primeiras {count} entradas',
   'explorer.notViewable': 'o wmux só pode abrir arquivos de texto',
   'explorer.copyPath': 'Copiar caminho',
+  'explorer.viewChanges': 'Ver alterações',
   'explorer.reveal': 'Mostrar no Explorador de Arquivos',
   'explorer.openInApp': 'Abrir no aplicativo padrão',
   'explorer.error.no_root': 'Este painel ainda não informou um diretório de trabalho',

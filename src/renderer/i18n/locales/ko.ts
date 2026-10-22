@@ -347,6 +347,7 @@ export const ko: Translation = {
   'explorer.truncated': '처음 {count}개 항목만 표시합니다',
   'explorer.notViewable': 'wmux는 텍스트 파일만 열 수 있습니다',
   'explorer.copyPath': '경로 복사',
+  'explorer.viewChanges': '변경 사항 보기',
   'explorer.reveal': '파일 탐색기에서 보기',
   'explorer.openInApp': '기본 앱으로 열기',
   'explorer.error.no_root': '이 창은 아직 작업 디렉터리를 보고하지 않았습니다',

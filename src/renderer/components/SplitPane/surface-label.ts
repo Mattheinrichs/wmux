@@ -25,6 +25,17 @@ function cwdFolderName(cwd: string): string | null {
 }
 
 /**
+ * A Diff tab pinned to a folder from the explorer (#325) says which one, or
+ * two of them side by side read as the same tab. One following the workspace
+ * (Ctrl+Shift+G) keeps the bare label.
+ */
+function diffLabel(surface: SurfaceRef, t: (key: TranslationKey, fallback?: string) => string): string {
+  const label = t('surfaceLabel.diff', 'Diff');
+  const folder = surface.cwd ? cwdFolderName(surface.cwd) : null;
+  return folder ? `${label} · ${folder}` : label;
+}
+
+/**
  * @param oscTitle The OSC 0/2 window title the pane's program last set (issue
  *   #221), already normalised by `normalizeOscTitle`, or undefined when the
  *   feature is off or nothing has set one. Ranked BELOW both names a human
@@ -76,7 +87,7 @@ export function getSurfaceLabel(
       return surface.markdownDirty ? `• ${name}` : name;
     }
     case 'diff':
-      return t('surfaceLabel.diff', 'Diff');
+      return diffLabel(surface, t);
     case 'code': {
       // Same `•` as markdown, and the same flag behind it. A code surface used
       // to be read-only by construction and carried no marker; now that it can

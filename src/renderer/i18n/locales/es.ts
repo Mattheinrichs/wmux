@@ -331,6 +331,7 @@ export const es: Translation = {
   'explorer.truncated': 'Mostrando las primeras {count} entradas',
   'explorer.notViewable': 'wmux solo puede abrir archivos de texto',
   'explorer.copyPath': 'Copiar ruta',
+  'explorer.viewChanges': 'Ver cambios',
   'explorer.reveal': 'Mostrar en el Explorador de archivos',
   'explorer.openInApp': 'Abrir en la aplicación predeterminada',
   'explorer.error.no_root': 'Este panel aún no ha informado de un directorio de trabajo',

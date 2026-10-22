@@ -425,6 +425,7 @@ export const en = {
   'explorer.truncated': 'Showing the first {count} entries',
   'explorer.notViewable': 'wmux can only open text files',
   'explorer.copyPath': 'Copy path',
+  'explorer.viewChanges': 'View changes',
   'explorer.reveal': 'Reveal in File Explorer',
   'explorer.openInApp': 'Open in default app',
   'explorer.error.no_root': 'This pane has not reported a working directory yet',

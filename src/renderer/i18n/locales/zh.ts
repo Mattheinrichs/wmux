@@ -326,6 +326,7 @@ export const zh: Translation = {
   'explorer.truncated': '仅显示前 {count} 项',
   'explorer.notViewable': 'wmux 只能打开文本文件',
   'explorer.copyPath': '复制路径',
+  'explorer.viewChanges': '查看更改',
   'explorer.reveal': '在文件资源管理器中显示',
   'explorer.openInApp': '用默认应用打开',
   'explorer.error.no_root': '此窗格尚未报告工作目录',

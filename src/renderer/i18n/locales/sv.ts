@@ -330,6 +330,7 @@ export const sv: Translation = {
   'explorer.truncated': 'Visar de första {count} posterna',
   'explorer.notViewable': 'wmux kan bara öppna textfiler',
   'explorer.copyPath': 'Kopiera sökväg',
+  'explorer.viewChanges': 'Visa ändringar',
   'explorer.reveal': 'Visa i Utforskaren',
   'explorer.openInApp': 'Öppna i standardappen',
   'explorer.error.no_root': 'Den här panelen har inte rapporterat någon arbetskatalog än',

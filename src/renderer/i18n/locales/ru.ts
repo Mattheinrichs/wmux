@@ -341,6 +341,7 @@ export const ru: Translation = {
   'explorer.truncated': 'Показаны первые {count} элементов',
   'explorer.notViewable': 'wmux открывает только текстовые файлы',
   'explorer.copyPath': 'Скопировать путь',
+  'explorer.viewChanges': 'Показать изменения',
   'explorer.reveal': 'Показать в проводнике',
   'explorer.openInApp': 'Открыть в приложении по умолчанию',
   'explorer.error.no_root': 'Эта панель ещё не сообщила рабочий каталог',

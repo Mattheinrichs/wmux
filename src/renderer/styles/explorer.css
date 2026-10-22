@@ -135,6 +135,16 @@
   letter-spacing: 0.01em;
 }
 
+.explorer-row__diff--link {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.explorer-row__diff--link:hover {
+  background: rgba(var(--ui-overlay-rgb), 0.1);
+  text-decoration: underline;
+}
+
 .explorer-row__diff-add { color: #3fb950; }
 .explorer-row__diff-del { color: #f85149; }
 
@@ -165,6 +175,21 @@
   border-bottom: 1px solid rgba(var(--ui-overlay-rgb), 0.08);
   color: rgba(var(--ui-overlay-rgb), 0.55);
   flex-shrink: 0;
+}
+
+/* The bar is a button since #325: it opens the Diff view. Reset what a
+   <button> brings so it still reads as the caption strip it was. */
+button.explorer-panel__diffbar {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid rgba(var(--ui-overlay-rgb), 0.08);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.explorer-panel__diffbar:hover {
+  color: rgba(var(--ui-overlay-rgb), 0.85);
+  background: rgba(var(--ui-overlay-rgb), 0.06);
 }
 
 .explorer-panel__diffbar-count {

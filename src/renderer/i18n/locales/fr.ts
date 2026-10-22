@@ -353,6 +353,7 @@ export const fr: Translation = {
   'explorer.truncated': 'Affichage des {count} premières entrées',
   'explorer.notViewable': 'wmux ne peut ouvrir que des fichiers texte',
   'explorer.copyPath': 'Copier le chemin',
+  'explorer.viewChanges': 'Voir les modifications',
   'explorer.reveal': "Révéler dans l'explorateur de fichiers",
   'explorer.openInApp': "Ouvrir dans l'application par défaut",
   'explorer.error.no_root': "Ce volet n'a pas encore signalé de répertoire de travail",

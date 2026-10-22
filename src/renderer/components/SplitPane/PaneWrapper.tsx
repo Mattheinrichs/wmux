@@ -362,7 +362,9 @@ export default function PaneWrapper({
                 })}
             />
           )}
-          {surface.type === 'diff' && <DiffPane surfaceId={surface.id} cwd={workspace?.cwd} />}
+          {/* A tab opened from the explorer is pinned to the explorer's root
+              (#325); one made by Ctrl+Shift+G follows the workspace. */}
+          {surface.type === 'diff' && <DiffPane surfaceId={surface.id} cwd={surface.cwd ?? workspace?.cwd} />}
           {surface.type === 'code' && <CodePane surfaceId={surface.id} />}
           {surface.type === 'prompts' && <PromptsPane surfaceId={surface.id} />}
         </div>
