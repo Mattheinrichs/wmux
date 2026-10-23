@@ -26,6 +26,7 @@ import { useBlockedAlert } from './hooks/useBlockedAlert';
 import type { AgentRosterEntry } from './store/agent-rollup';
 import ShortcutCheatSheet from './components/CheatSheet/ShortcutCheatSheet';
 import ConfirmCloseDialog from './components/ConfirmCloseDialog';
+import SaveLayoutDialog from './components/SaveLayoutDialog';
 import ConfirmCloseSurfaceDialog from './components/ConfirmCloseSurfaceDialog';
 import BrowserPane from './components/Browser/BrowserPane';
 import { rememberedPanelUrl, shouldRememberPanelUrl } from './utils/browser-start-page';
@@ -1945,6 +1946,7 @@ export default function App() {
 
       <ConfirmCloseDialog />
       <ConfirmCloseSurfaceDialog />
+      <SaveLayoutDialog />
 
       {broadcastInputActive && (
         <div className="broadcast-input-banner" title={t('app.broadcastInputTooltip', 'Typed input is sent to every terminal pane in this workspace')}>

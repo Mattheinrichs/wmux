@@ -220,6 +220,17 @@ export default function Sidebar({
     [workspaces, onUpdateMetadata],
   );
 
+  // ── Save as layout preset from context menu (#329) ───────────────────────
+  // The RIGHT-CLICKED workspace, not the active one, suggested under its own
+  // name; the dialog captures the id, so nothing changes until Save.
+  const handleSaveAsLayout = useCallback(
+    (id: WorkspaceId) => {
+      const ws = workspaces.find((w) => w.id === id);
+      if (ws) useStore.getState().requestLayoutSave(ws.title, id);
+    },
+    [workspaces],
+  );
+
   // ── Color from context menu ──────────────────────────────────────────────
   const handleSetColor = useCallback(
     (id: WorkspaceId, color: string | null) => {
@@ -403,6 +414,7 @@ export default function Sidebar({
           onClose={closeContextMenu}
           onPin={handlePin}
           onRename={onRename}
+          onSaveAsLayout={handleSaveAsLayout}
           onSetColor={handleSetColor}
           onSetStatusOverride={handleSetStatusOverride}
           onMoveUp={handleMoveUp}

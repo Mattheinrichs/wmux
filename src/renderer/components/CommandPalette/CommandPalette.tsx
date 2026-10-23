@@ -52,7 +52,7 @@ function fuzzyMatch(needle: string, haystack: string): boolean {
 export default function CommandPalette({ onClose, onAction }: CommandPaletteProps) {
   const {
     shortcuts, workspaces, activeWorkspaceId, selectWorkspace,
-    savedLayouts, createWorkspaceFromLayout, saveCurrentLayoutAsPreset,
+    savedLayouts, createWorkspaceFromLayout, requestLayoutSave,
   } = useStore();
   const t = useT();
 
@@ -153,12 +153,12 @@ export default function CommandPalette({ onClose, onAction }: CommandPaletteProp
       category: t('palette.category.layouts', 'Layouts'),
       action: () => {
         onClose();
-        const id = saveCurrentLayoutAsPreset(
+        const opened = requestLayoutSave(
           t('settings.workspacePanel.newLayoutName', 'Layout {n}').replace('{n}', String(savedLayouts.length + 1)),
         );
-        // null means no active workspace to capture — an edge case, but a
+        // false means no active workspace to capture — an edge case, but a
         // silent no-op here would look identical to "worked" from the palette.
-        if (!id) {
+        if (!opened) {
           (window as any).wmux?.notification?.fire({
             surfaceId: '',
             text: t('palette.saveCurrentLayoutFailed', 'No active workspace to save as a layout.'),
@@ -212,7 +212,7 @@ export default function CommandPalette({ onClose, onAction }: CommandPaletteProp
     return items;
   }, [
     shortcuts, workspaces, activeWorkspaceId, selectWorkspace, onAction, onClose, t,
-    savedLayouts, createWorkspaceFromLayout, saveCurrentLayoutAsPreset,
+    savedLayouts, createWorkspaceFromLayout, requestLayoutSave,
   ]);
 
   // Filter based on query

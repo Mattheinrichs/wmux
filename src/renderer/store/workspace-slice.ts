@@ -93,6 +93,13 @@ export interface WorkspaceSlice {
    * the user confirms the batch once instead of racing N dialogs. Runtime-only.
    */
   pendingCloseWorkspaceIds: WorkspaceId[];
+  /**
+   * The open "Save layout preset" naming dialog (#329), or null. `workspaceId`
+   * is captured when the dialog OPENS — the workspace right-clicked in the
+   * sidebar, or the active one — so switching workspaces while it is up cannot
+   * change what gets saved. Runtime-only, like the close queue above.
+   */
+  pendingLayoutSave: { workspaceId: WorkspaceId; suggestedName: string } | null;
 
   createWorkspace(options?: Partial<WorkspaceInfo>, t?: T): WorkspaceId;
   /**
@@ -121,12 +128,22 @@ export interface WorkspaceSlice {
   updateSplitTree(id: WorkspaceId, tree: SplitNode): void;
   replaceAllWorkspaces(workspaces: Array<Partial<WorkspaceInfo>>, activeIndex?: number, t?: T): void;
   /**
-   * Snapshot the active workspace's current pane arrangement (geometry, plus
+   * Snapshot the active workspace's (or `workspaceId`'s) current pane arrangement (geometry, plus
    * whatever shell/cwd/startupCommands each pane's surface already has) as a
    * new named entry in `savedLayouts`. Returns the new layout's id, or null
    * if there's no active workspace.
    */
-  saveCurrentLayoutAsPreset(name: string): string | null;
+  saveCurrentLayoutAsPreset(name: string, workspaceId?: WorkspaceId): string | null;
+  /**
+   * Open the naming dialog for a new preset (#329). Captures `workspaceId`
+   * (default: the active workspace) right now; returns false, opening nothing,
+   * when there is no such workspace — the caller reports that.
+   */
+  requestLayoutSave(suggestedName: string, workspaceId?: WorkspaceId): boolean;
+  /** Dialog Save: create the preset under `name` (trimmed, non-empty) and close. */
+  confirmLayoutSave(name: string): string | null;
+  /** Dialog Cancel / Escape: close without creating anything. */
+  cancelLayoutSave(): void;
   /**
    * Overwrite an existing `savedLayouts` entry's geometry with the active
    * workspace's current arrangement, keeping its id/name in place.
@@ -141,6 +158,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
   workspaces: [],
   activeWorkspaceId: null,
   pendingCloseWorkspaceIds: [],
+  pendingLayoutSave: null,
 
   createWorkspace(options = {}, t = identityT): WorkspaceId {
     const id: WorkspaceId = `ws-${uuid()}`;
@@ -334,9 +352,31 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
     });
   },
 
-  saveCurrentLayoutAsPreset(name: string): string | null {
+  requestLayoutSave(suggestedName: string, workspaceId?: WorkspaceId): boolean {
     const state = get();
-    const active = state.workspaces.find((w) => w.id === state.activeWorkspaceId);
+    const id = workspaceId ?? state.activeWorkspaceId;
+    if (!id || !state.workspaces.some((w) => w.id === id)) return false;
+    set({ pendingLayoutSave: { workspaceId: id, suggestedName } });
+    return true;
+  },
+
+  confirmLayoutSave(name: string): string | null {
+    const pending = get().pendingLayoutSave;
+    const trimmed = name.trim();
+    if (!pending || !trimmed) return null;
+    const id = get().saveCurrentLayoutAsPreset(trimmed, pending.workspaceId);
+    set({ pendingLayoutSave: null });
+    return id;
+  },
+
+  cancelLayoutSave(): void {
+    set({ pendingLayoutSave: null });
+  },
+
+  saveCurrentLayoutAsPreset(name: string, workspaceId?: WorkspaceId): string | null {
+    const state = get();
+    const targetId = workspaceId ?? state.activeWorkspaceId;
+    const active = state.workspaces.find((w) => w.id === targetId);
     if (!active) return null;
 
     const settings = get() as unknown as SettingsReach;

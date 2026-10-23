@@ -254,6 +254,32 @@ html.wmux-transparent #root {
   outline-offset: 0;
 }
 
+/* Layout preset naming dialog (#329). Above the Settings overlay (z-index 5000),
+   since Settings → Workspace is one of the places that opens it. */
+.save-layout-dialog__overlay {
+  z-index: 6000;
+}
+
+/* Its name field: the startup-command field, one line. */
+.save-layout-dialog__input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 320px;
+  margin: 0 0 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  background: var(--ui-bg-0);
+  color: var(--ui-text-primary);
+  font-size: 13px;
+}
+
+.save-layout-dialog__input:focus {
+  outline: 1px solid var(--ui-accent);
+  outline-offset: 0;
+}
+
 .confirm-dialog__btn--primary {
   border-color: var(--ui-accent);
   background: color-mix(in srgb, var(--ui-accent) 20%, transparent);

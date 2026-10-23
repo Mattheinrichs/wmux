@@ -91,7 +91,7 @@ export default function WorkspaceSettings() {
   const t = useT();
   const {
     workspacePrefs, setWorkspacePrefs,
-    savedLayouts, setSavedLayouts, saveCurrentLayoutAsPreset, updateLayoutFromCurrent,
+    savedLayouts, setSavedLayouts, requestLayoutSave, updateLayoutFromCurrent,
   } = useStore();
   // Which layout id was just overwritten, for a transient "Saved" confirmation
   // next to its button — unlike "+ Save as new preset", overwriting an
@@ -135,7 +135,7 @@ export default function WorkspaceSettings() {
     if (workspacePrefs.defaultLayoutId === id) setWorkspacePrefs({ defaultLayoutId: null });
   };
   const saveCurrent = () => {
-    saveCurrentLayoutAsPreset(
+    requestLayoutSave(
       t('settings.workspacePanel.newLayoutName', 'Layout {n}').replace('{n}', String(savedLayouts.length + 1)),
     );
   };

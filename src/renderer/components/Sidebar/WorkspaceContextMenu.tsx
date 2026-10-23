@@ -12,6 +12,8 @@ interface WorkspaceContextMenuProps {
   onClose: () => void;
   onPin: (id: WorkspaceId) => void;
   onRename: (id: WorkspaceId, title: string) => void;
+  /** Open the layout-preset naming dialog for this workspace (#329). */
+  onSaveAsLayout: (id: WorkspaceId) => void;
   onSetColor: (id: WorkspaceId, color: string | null) => void;
   onSetStatusOverride: (id: WorkspaceId, override: 'running' | 'idle' | null) => void;
   onMoveUp: (id: WorkspaceId) => void;
@@ -50,6 +52,7 @@ export default function WorkspaceContextMenu({
   onClose,
   onPin,
   onRename,
+  onSaveAsLayout,
   onSetColor,
   onSetStatusOverride,
   onMoveUp,
@@ -174,6 +177,9 @@ export default function WorkspaceContextMenu({
           {t('ctx.rename')}
         </div>
       )}
+
+      {/* Save as layout preset (#329) */}
+      {item(t('ctx.saveAsLayout', 'Save as Layout Preset…'), () => onSaveAsLayout(workspaceId))}
 
       <div className="ctx-menu__separator" />
 
