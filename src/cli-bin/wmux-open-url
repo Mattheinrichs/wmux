@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# $BROWSER target. The value is deliberately the bare name: BROWSER parsers
+# split on whitespace, and an install path can contain spaces
+# ("OneDrive - Pulsa"). wmux puts this directory on PATH in every pane.
+#
+# The sibling `wmux` is 0644 in a git checkout (it is executable on the
+# Windows side via drvfs), so run it through bash instead of exec'ing it.
+DIR=$(cd "$(dirname "$0")" && pwd)
+case "$1" in
+  http://*|https://*) ;;
+  *) exit 1 ;;
+esac
+if ! bash "$DIR/wmux" open "$@"; then
+  # wmux unreachable (node absent, pipe down): hand the URL to Windows rather
+  # than leave the click dead. Both are argv-passed, never shell-interpolated.
+  if command -v wslview >/dev/null 2>&1; then exec wslview "$1"; fi
+  exec explorer.exe "$1"
+fi

@@ -104,3 +104,17 @@ describe.runIf(IS_WIN)('wmux.cmd runtime selection (#187)', () => {
     expect(out.trim()).toBe('[%WMUX_NODE_BIN%][%ELECTRON_RUN_AS_NODE%]');
   });
 });
+
+describe.runIf(!IS_WIN)('wmux-open-url', () => {
+  it('forwards `open` and the URL to the CLI', () => {
+    const cli = probe();
+    const out = execFileSync('bash', [path.join(BIN, 'wmux-open-url'), 'https://example.com'], {
+      encoding: 'utf8',
+      env: { ...process.env, WMUX_CLI: cli, WMUX_NODE: process.execPath },
+    });
+    expect(JSON.parse(out.trim())).toEqual({
+      exe: process.execPath,
+      argv: ['open', 'https://example.com'],
+    });
+  });
+});
