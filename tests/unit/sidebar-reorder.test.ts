@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { edgeForPointer, reorderByDrop } from '../../src/renderer/components/Sidebar/reorder';
+import { edgeForListPointer, edgeForPointer, reorderByDrop } from '../../src/renderer/components/Sidebar/reorder';
 
 // Issue #124: the insert marker was drawn above the hovered row unconditionally,
 // but the drop landed above it only when dragging upwards — downwards the
@@ -73,5 +73,36 @@ describe('sidebar drag-to-reorder (issue #124)', () => {
         }
       }
     });
+  });
+});
+
+// Issue #330: a drop in the empty space below the last row (or in a gap between
+// rows) reached no row handler and was refused, so "move to the end" did nothing.
+describe('edgeForListPointer', () => {
+  const rows = [
+    { id: 'a', top: 0, height: 40 },
+    { id: 'b', top: 42, height: 40 },
+    { id: 'c', top: 84, height: 40 },
+  ];
+
+  it('maps the empty space below the last row to the end of the list', () => {
+    expect(edgeForListPointer(500, rows)).toEqual({ id: 'c', edge: 'below' });
+  });
+
+  it('maps a gap between rows onto the next row', () => {
+    expect(edgeForListPointer(41, rows)).toEqual({ id: 'b', edge: 'above' });
+  });
+
+  it('maps the padding above the first row to the start', () => {
+    expect(edgeForListPointer(-3, rows)).toEqual({ id: 'a', edge: 'above' });
+  });
+
+  it('moves a non-last workspace to the end when combined with reorderByDrop', () => {
+    const target = edgeForListPointer(500, rows)!;
+    expect(reorderByDrop(['a', 'b', 'c'], 'a', target.id, target.edge)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('is null for an empty list', () => {
+    expect(edgeForListPointer(10, [])).toBeNull();
   });
 });

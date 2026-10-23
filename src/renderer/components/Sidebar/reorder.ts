@@ -22,6 +22,26 @@ export function edgeForPointer(clientY: number, rect: { top: number; height: num
 }
 
 /**
+ * The row edge a drop on the LIST itself means — the pointer is in the empty
+ * space below the last row, in the padding, or in a gap between rows (#330).
+ * Those spots belong to no row, so no row's handler accepted the drag and the
+ * drop was refused outright: dragging a workspace "to the end" did nothing.
+ * The first row whose middle is below the pointer gets an `above` marker;
+ * past every middle, the last row gets `below` — the end of the list. `rows`
+ * are in display order. Null only for an empty list.
+ */
+export function edgeForListPointer<T>(
+  clientY: number,
+  rows: readonly { id: T; top: number; height: number }[],
+): { id: T; edge: DropEdge } | null {
+  if (rows.length === 0) return null;
+  for (const row of rows) {
+    if (clientY < row.top + row.height / 2) return { id: row.id, edge: 'above' };
+  }
+  return { id: rows[rows.length - 1].id, edge: 'below' };
+}
+
+/**
  * The list after dropping `draggedId` on the given edge of `targetId`, or null
  * when the drop is a no-op (unknown ids, or an edge the row already sits on) —
  * callers skip the store write entirely rather than churn a re-render.

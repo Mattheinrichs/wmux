@@ -397,6 +397,9 @@ export default function WorkspaceRow({
         dropEdge ? `workspace-row--drop-${dropEdge}` : '',
       ].filter(Boolean).join(' ')}
       style={rowStyle}
+      // Read by the sidebar list's own drop handler (#330), which has to map a
+      // pointer in empty space back onto the nearest row.
+      data-workspace-id={workspace.id}
       // TRACE drives everything from attributes so the CSS owns the rendering
       // and no style object is rebuilt per tick. Absent in classic mode, where
       // rowTrace is null and none of these selectors exist.
