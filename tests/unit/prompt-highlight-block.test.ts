@@ -28,6 +28,7 @@ interface FakeDecoration {
 
 function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
   const decorations: FakeDecoration[] = [];
+  const markers: Array<{ line: number; isDisposed: boolean; dispose(): void }> = [];
   const reads = { count: 0 };
   const state = { baseY: 0, cursorY: cursorLine };
   const term = {
@@ -48,11 +49,13 @@ function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
       },
     },
     registerMarker(offset: number) {
-      return {
+      const marker = {
         line: state.baseY + state.cursorY + offset,
         isDisposed: false,
         dispose() { this.isDisposed = true; },
       };
+      markers.push(marker);
+      return marker;
     },
     registerDecoration(options: Record<string, unknown>): FakeDecoration {
       const callbacks: ((el: HTMLElement) => void)[] = [];
@@ -67,7 +70,7 @@ function fakeTerminal(rows: string[], cursorLine = rows.length - 1) {
       return decoration;
     },
   };
-  return { term: term as unknown as Terminal, decorations, reads, rows };
+  return { term: term as unknown as Terminal, decorations, reads, rows, markers };
 }
 
 const SURFACE = 'surf-block';
@@ -75,6 +78,13 @@ const PROMPT = 'fix the flaky pty-manager test';
 
 function latest(decorations: FakeDecoration[]): FakeDecoration | undefined {
   return decorations[decorations.length - 1];
+}
+
+/** The tinted decoration on the prompt's first row — the one that re-validates. */
+function anchor(decorations: FakeDecoration[]): FakeDecoration | undefined {
+  return decorations.find((d) => !d.disposed
+    && d.options.backgroundColor
+    && (d.options.marker as { line: number }).line === 0);
 }
 
 beforeEach(() => forgetSurface(SURFACE));
@@ -276,7 +286,93 @@ describe('the decoration is bounded to that block', () => {
       text,
     });
 
-    expect(latest(decorations)?.options.height).toBe(2);
+    const tinted = decorations.filter((d) => d.options.backgroundColor);
+    expect(tinted.map((d) => (d.options.marker as { line: number }).line)).toEqual([0, 1]);
+    expect(tinted.map((d) => d.options.height)).toEqual([1, 1]);
+  });
+
+  // xterm resolves a decoration's `backgroundColor` per CELL, by looking up
+  // decorations whose marker is on that cell's row (DecorationService.
+  // forEachDecorationAtCell). `height` only sizes the DOM element, which is the
+  // rail — so one tall decoration tints its first row and nothing below it.
+  it('tints every row of a wrapped prompt, not just the anchor row', () => {
+    const rows = [
+      ' session one │  a very long prompt line that',
+      '              continues on the next row and',
+      '              ends here',
+      '',
+    ];
+    const text = 'a very long prompt line that continues on the next row and ends here';
+    const { term, decorations } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    applyHighlight(term, SURFACE, 'e1', {
+      color: '#6ea8ff',
+      rows: 1,
+      ruler: true,
+      needle: buildNeedle(text),
+      confirmed: false,
+      text,
+    });
+
+    const tinted = decorations.filter((d) => d.options.backgroundColor);
+    expect(tinted.map((d) => (d.options.marker as { line: number }).line)).toEqual([0, 1, 2]);
+    expect(tinted.map((d) => d.options.height)).toEqual([1, 1, 1]);
+    expect(decorations.filter((d) => d.options.overviewRulerOptions)).toHaveLength(1);
+  });
+
+  it('releases the row markers when the highlight is rebuilt', () => {
+    const text = 'first line of the prompt\nsecond line of the prompt';
+    const rows = [
+      '│  first line of the prompt',
+      '│  second line of the prompt',
+      '',
+    ];
+    const { term, markers } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    const options = {
+      color: '#6ea8ff',
+      rows: 2,
+      ruler: true,
+      needle: buildNeedle(text),
+      confirmed: false,
+      text,
+    };
+
+    applyHighlight(term, SURFACE, 'e1', options);
+    expect(markers).toHaveLength(2); // the anchor plus the second row
+    const secondRow = markers[1];
+
+    applyHighlight(term, SURFACE, 'e1', options);
+    expect(secondRow.isDisposed).toBe(true);
+    expect(markers.filter((marker) => !marker.isDisposed)).toHaveLength(2);
+  });
+
+  it('releases the row markers when the anchor line is trimmed away', () => {
+    const text = 'first line of the prompt\nsecond line of the prompt';
+    const rows = [
+      '│  first line of the prompt',
+      '│  second line of the prompt',
+      '',
+    ];
+    const { term, markers } = fakeTerminal(rows);
+    openMarkAt(term, SURFACE, 'e1', 0);
+    const options = {
+      color: '#6ea8ff',
+      rows: 2,
+      ruler: true,
+      needle: buildNeedle(text),
+      confirmed: false,
+      text,
+    };
+    applyHighlight(term, SURFACE, 'e1', options);
+    const secondRow = markers[1];
+    expect(secondRow.isDisposed).toBe(false);
+
+    // xterm disposes an anchor marker once its line leaves the scrollback. The
+    // rows below can still be on screen, so nothing else would drop them.
+    markers[0].line = -1;
+    applyHighlight(term, SURFACE, 'e1', options);
+    expect(secondRow.isDisposed).toBe(true);
   });
 
   it('drops the band when the first row stops carrying the prompt', () => {
@@ -296,7 +392,7 @@ describe('the decoration is bounded to that block', () => {
       confirmed: false,
       text: 'first line of the prompt\nsecond line of the prompt',
     });
-    const first = latest(decorations)!;
+    const first = anchor(decorations)!;
     expect(first.options.backgroundColor).toBeTruthy();
 
     rows[0] = '│  something else entirely';
@@ -327,7 +423,7 @@ describe('the decoration is bounded to that block', () => {
     });
 
     reads.count = 0;
-    latest(decorations)!.render();
+    anchor(decorations)!.render();
     expect(reads.count).toBe(1);
   });
 

@@ -33,6 +33,16 @@ import type { IDecoration, IMarker, Terminal } from '@xterm/xterm';
 interface MarkRecord {
   marker: IMarker;
   decorations: IDecoration[];
+  /**
+   * Markers for the tint rows BELOW the anchor row.
+   *
+   * xterm resolves a decoration's `backgroundColor` per cell by looking up the
+   * decorations whose marker is on that cell's row — `height` sizes the DOM
+   * element (the rail) and does not extend the tint. So a multi-row band is one
+   * decoration per row, and every row below the anchor needs its own marker.
+   * They are disposed with the highlight, never with the anchor.
+   */
+  rowMarkers: IMarker[];
   /** A re-validation is already queued; see `applyHighlight`'s `onRender`. */
   revalidating?: boolean;
   /**
@@ -202,8 +212,12 @@ export function openMarkAt(
   const marker = markerAt(terminal, absoluteLine);
   if (!marker) return null;
   const records = recordsFor(surfaceId);
-  records.get(entryId)?.marker.dispose();
-  records.set(entryId, { marker, decorations: [] });
+  const previous = records.get(entryId);
+  if (previous) {
+    dropHighlightObjects(previous);
+    previous.marker.dispose();
+  }
+  records.set(entryId, { marker, decorations: [], rowMarkers: [] });
   return marker.line;
 }
 
@@ -302,9 +316,9 @@ function moveMark(
 ): number | null {
   const moved = markerAt(terminal, line);
   if (!moved) return null;
-  for (const decoration of record.decorations) decoration.dispose();
+  dropHighlightObjects(record);
   record.marker.dispose();
-  marks.get(surfaceId)?.set(entryId, { marker: moved, decorations: [] });
+  marks.get(surfaceId)?.set(entryId, { marker: moved, decorations: [], rowMarkers: [] });
   return moved.line;
 }
 
@@ -664,6 +678,16 @@ function blendOverBackground(color: string, background: string): string | null {
  * full saturation, and the custom property still carries it so `prompt-marks.css`
  * owns the width.
  *
+ * ─── Why a multi-row band is one decoration PER ROW ─────────────────────────
+ *
+ * `height` sizes the decoration's DOM element — which is the rail — but it does
+ * NOT extend the tint. Both renderers resolve a cell's background through
+ * `DecorationService.forEachDecorationAtCell(x, line)`, which looks decorations
+ * up by the marker's line alone; a decoration with `height: 3` paints its
+ * `backgroundColor` on row 0 and leaves rows 1-2 at the terminal's own colour.
+ * So the band is registered one row at a time, each row anchored by its own
+ * marker, and only the anchor row carries `onRender` / the re-validation.
+ *
  * ─── Why the tint is checked against the row's CONTENT (issue #230) ──────────
  *
  * A marker anchors a decoration to a buffer LINE, and for a shell that is the
@@ -697,8 +721,12 @@ export function applyHighlight(
   options: HighlightOptions,
 ): HighlightResult {
   const record = marks.get(surfaceId)?.get(entryId);
-  if (!record || record.marker.line < 0) return { tinted: false, settled: false };
+  if (!record) return { tinted: false, settled: false };
+  // Drop before the trim guard. xterm disposes a marker's own decorations when
+  // its line leaves the scrollback, but the row markers below the anchor are
+  // separate objects that can still be on screen — and nothing else drops them.
   clearHighlight(surfaceId, entryId);
+  if (record.marker.line < 0) return { tinted: false, settled: false };
 
   const block = options.text ? locatePromptBlock(terminal, record.marker.line, options.text) : null;
   // The composer grows UPWARD from the cursor, so "above the cursor" is not a
@@ -745,72 +773,134 @@ export function applyHighlight(
     ? Math.max(1, Math.min(terminal.cols - x, endCell - x + 1))
     : terminal.cols;
 
-  try {
-    const decoration = terminal.registerDecoration({
-      marker: record.marker,
-      x,
-      width,
-      height,
-      layer: 'bottom',
-      ...(tint ? { backgroundColor: tint } : {}),
-      ...(options.ruler
-        ? { overviewRulerOptions: { color: options.color, position: 'left' as const } }
-        : {}),
-    });
-    if (!decoration) return { tinted: false, settled };
-    if (onTheRow) {
-      decoration.onRender((element) => {
-        // onRender fires again every time the row is re-laid-out (resize, scroll
-        // back into view), so this must be idempotent: classList and a custom
-        // property both are.
-        element.classList.add('wmux-prompt-mark');
-        element.style.setProperty('--wmux-prompt-color', options.color);
-        // Only when the blend could not be computed — an unparseable theme
-        // background — does the old over-the-glyphs tint come back, because a
-        // washed-out hint still beats a rail with nothing beside it.
-        element.classList.toggle('wmux-prompt-mark--css-tint', !tint);
-        // Nothing to re-check when the tint rests on the caller's word rather
-        // than on the row's text.
-        if (options.text) {
-          const check = record.blockCheck;
-          const row = lineText(terminal, record.marker.line);
-          if (check && check.text && row.slice(check.start, check.start + check.text.length) === check.text) return;
-        } else {
-          if (!needle || found === null) return;
-          const row = record.marker.line + found;
-          if (needleRow(terminal, row, 1, needle) !== null) return;
-        }
-        // The row stopped carrying the prompt. Re-deciding means disposing this
-        // decoration, which must not happen from inside xterm's own render pass
-        // — it is iterating the decoration list right now. One deferred pass per
-        // record, so a decoration re-rendering at PTY speed queues one re-apply
-        // and not one per frame; the re-apply lands on the ruler-only branch,
-        // which registers no `onRender`, so this terminates.
-        if (record.revalidating) return;
-        record.revalidating = true;
-        setTimeout(() => {
-          record.revalidating = false;
-          applyHighlight(terminal, surfaceId, entryId, options);
-        }, 0);
+  const ruler = options.ruler
+    ? { overviewRulerOptions: { color: options.color, position: 'left' as const } }
+    : {};
+
+  // Ruler only: one decoration on the anchor row, no class and no `onRender`.
+  // This is also where a re-validation lands when the row stopped carrying the
+  // prompt, so it is the terminal state of the loop.
+  if (!onTheRow) {
+    try {
+      const decoration = terminal.registerDecoration({
+        marker: record.marker,
+        x,
+        width,
+        height: 1,
+        layer: 'bottom',
+        ...ruler,
       });
+      if (!decoration) return { tinted: false, settled };
+      record.decorations.push(decoration);
+      return { tinted: false, settled };
+    } catch {
+      return { tinted: false, settled };
     }
-    record.decorations.push(decoration);
-    return { tinted: onTheRow, settled };
-  } catch {
-    // Decorations are proposed API. A future xterm that changes the shape here
-    // must degrade to "no highlight", never to a broken pane.
-    return { tinted: false, settled };
   }
+
+  // One decoration per row, each anchored by a marker ON that row. A single
+  // decoration with `height: rows` would size the rail correctly and tint only
+  // the anchor row: xterm's renderers look a cell's background up by the
+  // decoration's marker line and never consult `height` (DecorationService.
+  // forEachDecorationAtCell, used by both CellColorResolver and DomRendererRow
+  // Factory). The extra markers are cheap and short-lived — dropped with the
+  // highlight in `clearHighlight`.
+  let painted = 0;
+  for (let row = 0; row < height; row++) {
+    let anchor = record.marker;
+    if (row > 0) {
+      const extra = markerAt(terminal, record.marker.line + row);
+      if (!extra) continue;
+      anchor = extra;
+    }
+    let decoration: IDecoration | null;
+    try {
+      decoration = terminal.registerDecoration({
+        marker: anchor,
+        x,
+        width,
+        height: 1,
+        layer: 'bottom',
+        ...(tint ? { backgroundColor: tint } : {}),
+        ...(row === 0 ? ruler : {}),
+      }) ?? null;
+    } catch {
+      // Decorations are proposed API. A future xterm that changes the shape
+      // here must degrade to "no highlight", never to a broken pane.
+      decoration = null;
+    }
+    if (!decoration) {
+      if (row > 0) {
+        try { anchor.dispose(); } catch { /* already gone */ }
+      }
+      continue;
+    }
+    if (row > 0) record.rowMarkers.push(anchor);
+    decoration.onRender((element) => {
+      // onRender fires again every time the row is re-laid-out (resize, scroll
+      // back into view), so this must be idempotent: classList and a custom
+      // property both are.
+      element.classList.add('wmux-prompt-mark');
+      element.style.setProperty('--wmux-prompt-color', options.color);
+      // Only when the blend could not be computed — an unparseable theme
+      // background — does the old over-the-glyphs tint come back, because a
+      // washed-out hint still beats a rail with nothing beside it.
+      element.classList.toggle('wmux-prompt-mark--css-tint', !tint);
+      // Every row carries the rail; only the anchor row decides whether the
+      // block still carries the prompt.
+      if (row > 0) return;
+      // Nothing to re-check when the tint rests on the caller's word rather
+      // than on the row's text.
+      if (options.text) {
+        const check = record.blockCheck;
+        const anchorRow = lineText(terminal, record.marker.line);
+        if (check && check.text && anchorRow.slice(check.start, check.start + check.text.length) === check.text) return;
+      } else {
+        if (!needle || found === null) return;
+        const needleLine = record.marker.line + found;
+        if (needleRow(terminal, needleLine, 1, needle) !== null) return;
+      }
+      // The row stopped carrying the prompt. Re-deciding means disposing this
+      // decoration, which must not happen from inside xterm's own render pass
+      // — it is iterating the decoration list right now. One deferred pass per
+      // record, so a decoration re-rendering at PTY speed queues one re-apply
+      // and not one per frame; the re-apply lands on the ruler-only branch,
+      // which registers no `onRender`, so this terminates.
+      if (record.revalidating) return;
+      record.revalidating = true;
+      setTimeout(() => {
+        record.revalidating = false;
+        applyHighlight(terminal, surfaceId, entryId, options);
+      }, 0);
+    });
+    record.decorations.push(decoration);
+    painted++;
+  }
+  return { tinted: painted > 0, settled };
+}
+
+/**
+ * Drop a mark's decorations AND the markers that exist only to carry them.
+ *
+ * The anchor marker is deliberately kept — it is the jump target and the row
+ * re-validation reads. The row markers below it have no life of their own.
+ */
+function dropHighlightObjects(record: MarkRecord): void {
+  for (const decoration of record.decorations) {
+    try { decoration.dispose(); } catch { /* already gone with its marker */ }
+  }
+  record.decorations = [];
+  for (const marker of record.rowMarkers) {
+    try { marker.dispose(); } catch { /* already gone with its line */ }
+  }
+  record.rowMarkers = [];
 }
 
 /** Drop a mark's decorations, keeping the marker (and so the jump target). */
 export function clearHighlight(surfaceId: string, entryId: string): void {
   const record = marks.get(surfaceId)?.get(entryId);
   if (!record) return;
-  for (const decoration of record.decorations) {
-    try { decoration.dispose(); } catch { /* already gone with its marker */ }
-  }
-  record.decorations = [];
+  dropHighlightObjects(record);
 }
 
 /**
@@ -859,9 +949,7 @@ export function forgetSurface(surfaceId: string): void {
 function disposeRecord(records: Map<string, MarkRecord>, entryId: string): void {
   const record = records.get(entryId);
   if (!record) return;
-  for (const decoration of record.decorations) {
-    try { decoration.dispose(); } catch { /* already gone with its marker */ }
-  }
+  dropHighlightObjects(record);
   try { record.marker.dispose(); } catch { /* already self-disposed on trim */ }
   records.delete(entryId);
 }

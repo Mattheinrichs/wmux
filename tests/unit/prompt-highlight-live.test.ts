@@ -105,11 +105,10 @@ describe('an agent prompt submitted from the live composer', () => {
     rows[3] = '> ';
     vi.advanceTimersByTime(200);
 
-    const echo = latest(decorations)!;
-    expect(echo.options.backgroundColor).toBeTruthy();
-    expect(echo.options.height).toBe(2);
-    expect(echo.options.x).toBe(rows[0].indexOf('fix') - 1);
-    expect(echo.options.width).toBeLessThan(80);
+    const tinted = decorations.filter((d) => !d.disposed && d.options.backgroundColor);
+    expect(tinted.map((d) => (d.options.marker as { line: number }).line)).toEqual([0, 1]);
+    expect(tinted[0].options.x).toBe(rows[0].indexOf('fix') - 1);
+    expect(tinted[0].options.width).toBeLessThan(80);
     expect(useStore.getState().prompts[SURFACE]?.[0]?.line).toBe(0);
   });
 
@@ -133,9 +132,8 @@ describe('an agent prompt submitted from the live composer', () => {
     state.cursorY = 2;
     vi.advanceTimersByTime(200);
 
-    const echo = latest(decorations)!;
-    expect(echo.options.backgroundColor).toBeTruthy();
-    expect(echo.options.height).toBe(2);
+    const tinted = decorations.filter((d) => !d.disposed && d.options.backgroundColor);
+    expect(tinted.map((d) => (d.options.marker as { line: number }).line)).toEqual([0, 1]);
     expect(useStore.getState().prompts[SURFACE]?.[0]?.line).toBe(0);
   });
 });
