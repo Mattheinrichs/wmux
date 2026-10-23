@@ -3,6 +3,7 @@ import { QuickLaunchProfile, SavedLayout } from '../../shared/types';
 import { INDEX_MODIFIER_CHOICES, IndexModifiers, reconcileIndexModifiers } from '../utils/index-shortcuts';
 import { bindingsEqual } from '../utils/shortcut-binding';
 import type { BellStyle } from '../utils/terminal-bell';
+import type { RightClickMode } from '../utils/terminal-right-click';
 import type { WorkspaceLayout } from './split-utils';
 import {
   Language,
@@ -681,6 +682,13 @@ export interface TerminalPrefs {
    * follow `notificationPrefs.bellNotify`. See utils/terminal-bell.ts.
    */
   bellStyle: BellStyle;
+  /**
+   * Right-click inside a terminal (#336): copy the selection or paste, as in
+   * Windows Terminal (`copyPaste`), always paste, or nothing. An app with
+   * mouse tracking on gets the click unless Shift is held. See
+   * utils/terminal-right-click.ts.
+   */
+  rightClick: RightClickMode;
   /** User-defined color schemes, addressable by name in per-pane overrides. */
   userColorSchemes: Record<string, UserColorScheme>;
 }
@@ -695,6 +703,7 @@ export const DEFAULT_TERMINAL_PREFS: TerminalPrefs = {
   oscTitleTabs: true,
   touchPanGain: 1,
   bellStyle: 'visual',
+  rightClick: 'copyPaste',
   userColorSchemes: {},
 };
 

@@ -557,6 +557,13 @@ export const en = {
   'settings.terminalPanel.bellStyle.none': 'Silent',
   'settings.terminalPanel.bellStyleHint':
     'What a bell does in a pane you can see — shells ring it on Backspace at an empty prompt or a Tab with no match. A bell in a background tab, another workspace or while wmux is in the background raises a notification instead (Settings → Notifications).',
+  'settings.terminalPanel.mouseSection': 'Mouse',
+  'settings.terminalPanel.rightClick': 'Right-click',
+  'settings.terminalPanel.rightClick.copyPaste': 'Copy selection, otherwise paste',
+  'settings.terminalPanel.rightClick.paste': 'Always paste',
+  'settings.terminalPanel.rightClick.off': 'Do nothing',
+  'settings.terminalPanel.rightClickHint':
+    'Right-click in a terminal to copy or paste, as in Windows Terminal. In apps that use the mouse (vim, tmux), the click goes to the app — hold Shift to use the clipboard.',
   'settings.terminalPanel.scrollbackSection': 'Scrollback',
   'settings.terminalPanel.scrollbackLines': 'Scrollback lines',
   'settings.terminalPanel.touchSection': 'Touch',
