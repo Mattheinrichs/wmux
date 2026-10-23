@@ -200,6 +200,29 @@ against real `opencode-ai` 1.18.35 and `@opencode/cli` 2.0.24:
 
 ---
 
+## Links
+
+wmux sets `BROWSER=wmux-open-url` in WSL panes. The shim calls `wmux open`,
+which goes through the same destination rule as a terminal link click: the panel
+by default, the system browser when **Settings → Browser → Open links in the
+system browser** is on.
+
+- Codex already honours `$BROWSER` through the Rust `webbrowser` crate, so its
+  plain link clicks land in the panel as soon as a wmux build with the shim is
+  running.
+- OpenCode needs `$BROWSER` support in its own opener (OpenCode issue
+  [#58526](https://github.com/anomalyco/opencode/issues/58526)). Until that
+  ships, plain clicks in an OpenCode pane still open the system browser and
+  Ctrl+click is the way to the panel.
+- Mouse capture, wheel forwarding and touch-pan gain are unchanged: this routes
+  where a link opens, not how the pane scrolls.
+- `wmux-open-url` resolves through PATH, which relies on WSL's default
+  `appendWindowsPath` interop — the same mechanism that makes `wmux` itself
+  runnable in the pane. If interop is disabled, links fall back to the system
+  browser.
+
+---
+
 ## Versioning
 
 The first line of `wmux.js` is a marker:
