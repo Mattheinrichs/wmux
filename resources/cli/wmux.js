@@ -5,12 +5,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RAW_V1_VERBS = void 0;
+exports.cliPipePath = cliPipePath;
 exports.timeoutMessage = timeoutMessage;
 exports.browserRequest = browserRequest;
 exports.subcommandError = subcommandError;
 exports.formatRemoteStatus = formatRemoteStatus;
 exports.parseFlagArgs = parseFlagArgs;
 exports.layoutAgentsParams = layoutAgentsParams;
+exports.sendKeyParams = sendKeyParams;
 exports.emptyPromptNote = emptyPromptNote;
 exports.promptTruncationNote = promptTruncationNote;
 exports.hookParams = hookParams;
@@ -65,8 +67,19 @@ function readWslNetworkingMode() {
     }
 }
 // Respect WMUX_PIPE when set (e.g. by a parent wmux running with WMUX_INSTANCE),
-// so the CLI talks to the same instance that spawned the shell.
-const PIPE_PATH = process.env.WMUX_PIPE || '\\\\.\\pipe\\wmux';
+// so the CLI talks to the same instance that spawned the shell. Without it, the
+// fallback follows WMUX_INSTANCE the way shared/instance.ts's getPipePath()
+// does — restated rather than imported, because the CLI ships file by file (see
+// wmux-hook.ts). It used to be the installed pipe whatever the instance, while
+// readPipeToken() below already read that instance's token: a CLI run outside a
+// pane against a side-by-side build sent the dev token to the installed wmux.
+function cliPipePath(env) {
+    if (env.WMUX_PIPE)
+        return env.WMUX_PIPE;
+    const instance = env.WMUX_INSTANCE?.trim() ?? '';
+    return '\\\\.\\pipe\\wmux' + (instance ? '-' + instance : '');
+}
+const PIPE_PATH = cliPipePath(process.env);
 // ─── Remote transport (issue #78: remote wmux management) ────────────────────
 // When --remote host[:port] (or WMUX_REMOTE) is set, every command connects
 // over TCP instead of the local named pipe — typically through an SSH tunnel
@@ -1214,20 +1227,22 @@ async function cmdSend(args) {
         payload.surfaceId = surfaceId;
     print(await sendV2('surface.send_text', payload));
 }
+const KEY_MODIFIER_FLAGS = ['--ctrl', '--shift', '--alt'];
+/**
+ * `send-key` params. The key is the first argument that is neither a modifier
+ * flag nor `--surface` and its value, so flags may come before or after it, as
+ * `send` already allows. It used to be `args[1]`, which made
+ * `send-key --surface X enter` send the key "--surface".
+ */
+function sendKeyParams(args, callerSurface) {
+    const flags = new Set(KEY_MODIFIER_FLAGS);
+    const key = stripFlag(args.slice(1), '--surface').find((a) => !flags.has(a));
+    const modifiers = KEY_MODIFIER_FLAGS.filter((f) => args.includes(f)).map((f) => f.slice(2));
+    const surfaceId = getFlag(args, '--surface') || callerSurface;
+    return surfaceId ? { key, modifiers, surfaceId } : { key, modifiers };
+}
 async function cmdSendKey(args) {
-    const key = args[1];
-    const modifiers = [];
-    if (args.includes('--ctrl'))
-        modifiers.push('ctrl');
-    if (args.includes('--shift'))
-        modifiers.push('shift');
-    if (args.includes('--alt'))
-        modifiers.push('alt');
-    const surfaceId = getFlag(args, '--surface') || process.env.WMUX_SURFACE_ID;
-    const payload = { key, modifiers };
-    if (surfaceId)
-        payload.surfaceId = surfaceId;
-    print(await sendV2('surface.send_key', payload));
+    print(await sendV2('surface.send_key', sendKeyParams(args, process.env.WMUX_SURFACE_ID)));
 }
 /** One prompt line: `#<seq>  <hh:mm>  <summary>`. */
 function promptLine(entry) {
