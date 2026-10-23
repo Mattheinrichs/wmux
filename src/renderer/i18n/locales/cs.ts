@@ -54,7 +54,11 @@ export const cs: Translation = {
   'palette.category.commands': 'Příkazy',
   'palette.category.workspaces': 'Pracovní prostory',
   'palette.category.themes': 'Motivy',
+  'palette.category.layouts': 'Rozložení',
   'palette.openMarkdown': 'Otevřít soubor Markdown…',
+  'palette.saveCurrentLayout': 'Uložit aktuální rozložení jako novou předvolbu',
+  'palette.saveCurrentLayoutFailed': 'Není aktivní žádný pracovní prostor, jehož rozložení lze uložit.',
+  'palette.newWorkspaceWithLayout': 'Nový pracovní prostor: {name}',
   'palette.current': 'aktuální',
   // Horní lišta
   'titlebar.help': 'Nápověda / Úvodní příručka',
@@ -229,6 +233,10 @@ export const cs: Translation = {
   'sidebar.saveSession': 'Uložit relaci',
   'sidebar.loadSession': 'Načíst relaci',
   'sidebar.newWorkspace': 'Nový pracovní prostor',
+  'sidebar.newWorkspaceFromLayout': 'Nový pracovní prostor z rozložení…',
+  'sidebar.layoutMenu.empty': 'Zatím nejsou uložena žádná rozložení',
+  'sidebar.layoutMenu.untitled': 'Rozložení bez názvu',
+  'sidebar.layoutMenu.manage': 'Spravovat rozložení…',
   // Postranní panel — nabídka relací (uložit/načíst)
   'sessionMenu.justNow': 'právě teď',
   'sessionMenu.minutesAgo': 'před {count} min',
@@ -449,6 +457,7 @@ export const cs: Translation = {
   'settings.terminalPanel.fg': 'text',
   'settings.terminalPanel.cursorAbbr': 'kurzor',
   // Nastavení — panel Pracovní prostor
+  'settings.workspacePanel.newLayoutName': 'Rozložení {n}',
   'settings.workspacePanel.behaviourSection': 'Chování pracovního prostoru',
   'settings.workspacePanel.newPlacement': 'Umístění nového pracovního prostoru',
   'settings.workspacePanel.placement.afterCurrent': 'Za aktuálním',
