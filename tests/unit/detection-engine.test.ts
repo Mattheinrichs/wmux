@@ -163,6 +163,14 @@ describe('detectScreen — current business question', () => {
     expect(out).toMatchObject({ agent: 'claude', state: 'question', ruleId: 'claude.question.pending' });
   });
 
+  // The turn-done marker counts hours too ("for 1h 2m"), as the idle and
+  // working rules' marker exclusion does; a long turn must not lose its question.
+  it('reads a question after a turn that ran for over an hour', () => {
+    const lines = screen('wmux-current-question-pending').lines.map((l) =>
+      l.startsWith('✻ Cooked for') ? '✻ Cooked for 1h 2m · done 3:44 PM' : l);
+    expect(detectScreen({ lines }, BUNDLED_MANIFESTS)).toMatchObject({ state: 'question', ruleId: 'claude.question.pending' });
+  });
+
   // The shape of the screen that started this: the question is followed by
   // more text on its own line, so "the line ends in ?" never saw it.
   it('reads a question that is followed by more text on the same line', () => {

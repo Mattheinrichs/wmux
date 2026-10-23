@@ -42,7 +42,7 @@ const SPINNER = '[✳✴✵✶✷✸✹✺✻✼✽·✦✧✢]';
  * It shares the spinner glyph with the working line and differs by having no
  * live-run parenthetical — which is why `working` never fires on it.
  */
-const TURN_DONE = `^\\s*${SPINNER}\\s+\\S+ for \\d+[ms]\\b.*\\bdone\\b`;
+const TURN_DONE = `^\\s*${SPINNER}\\s+\\S+ for \\d+[hms]\\b.*\\bdone\\b`;
 
 /**
  * The first line of one of Claude's messages or tool calls: "● Done." Windows
