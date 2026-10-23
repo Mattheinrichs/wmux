@@ -488,12 +488,7 @@ export const OPEN_URL_TIMEOUT_MS = 10_000;
  */
 export function openUrlArg(args: string[]): string {
   const value = args[1] ?? '';
-  let protocol = '';
-  try {
-    protocol = new URL(value).protocol;
-  } catch {
-    protocol = '';
-  }
+  const protocol = URL.canParse(value) ? new URL(value).protocol : '';
   if (protocol !== 'http:' && protocol !== 'https:') {
     throw new Error('wmux open: expected one http(s) URL');
   }
