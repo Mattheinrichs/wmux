@@ -13,6 +13,7 @@ describe('wmux open argument', () => {
     ['open', 'file:///etc/passwd'],
     ['open', 'example.com'],
     ['open', ''],
+    ['open', 'https://example.com', 'extra'],
   ])('rejects %p', args => {
     expect(() => openUrlArg(args)).toThrow(/http\(s\) URL/);
   });
