@@ -10,7 +10,9 @@ const FIXTURES = path.join(__dirname, '..', 'fixtures', 'detection');
 /** A captured screen, as the renderer would hand it over. */
 function screen(name: string): { lines: string[] } {
   const raw = fs.readFileSync(path.join(FIXTURES, `${name}.txt`), 'utf8');
-  return { lines: raw.replace(/\n$/, '').split('\n') };
+  // A Windows checkout may have turned the fixture's LF into CRLF; the renderer
+  // never hands over a '\r'.
+  return { lines: raw.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n') };
 }
 
 const read = (name: string, expected?: string | null) =>
@@ -33,6 +35,73 @@ describe('detectScreen — Claude Code', () => {
     expect(read('claude-idle')).toMatchObject({
       agent: 'claude', state: 'idle', ruleId: 'claude.idle.prompt',
     });
+  });
+
+  // After every finished turn Claude Code leaves "✻ Crunched for 2s · done
+  // 12:40 AM" above the prompt box. It shares the spinner glyph with a live run,
+  // so the idle rule's spinner veto used to read it as a run and give `unknown`.
+  // The fixture keeps the live prompt shape: ">" then U+00A0.
+  it('reads the prompt after a finished turn as idle, turn-done marker and all', () => {
+    expect(read('claude-idle-after-turn')).toMatchObject({
+      agent: 'claude', state: 'idle', ruleId: 'claude.idle.prompt',
+    });
+  });
+
+  // Claude Code pre-fills a suggested next message on the prompt line in dim
+  // text, after the same U+00A0 (a live capture reads "> Oui, c'est
+  // réussi."); read as plain text it is indistinguishable from typing, and
+  // either way the agent is waiting on the user.
+  it('reads a prompt line holding a suggestion or a draft as idle', () => {
+    const s = screen('claude-idle-after-turn');
+    const lines = s.lines.map((l) => (l === '> ' ? '> Merci, c’est noté.' : l));
+    expect(lines).toContain('> Merci, c’est noté.');
+    expect(detectScreen({ lines }, BUNDLED_MANIFESTS)).toMatchObject({ agent: 'claude', state: 'idle' });
+  });
+
+  // The transcript repeats each message the user sent as "> " + text, with a
+  // plain space. With no prompt box on screen (a dialog no rule knows), that
+  // echo is not a prompt, and the screen stays unknown.
+  it('never reads the user’s echoed message as the prompt box', () => {
+    const s = screen('claude-idle-after-turn');
+    const lines = s.lines.filter((l) => l !== '> ');
+    expect(lines).toHaveLength(s.lines.length - 1);
+    expect(lines.some((l) => l.startsWith('> Deuxième essai'))).toBe(true);
+    expect(detectScreen({ lines }, BUNDLED_MANIFESTS).state).toBe('unknown');
+  });
+
+  // A live Claude Code 2.1.305 run in auto mode, sampled frame by frame, drew
+  // "✢ Flambéing… (14s · ↓ 1.5k tokens · thought for 8s)" with no "esc to
+  // interrupt". ✢ was missing from SPINNER, so on that frame no rule saw the
+  // run and the empty prompt below it read idle.
+  it('reads a run on the ✢ spinner frame as working', () => {
+    const working = screen('claude-working');
+    const live = '✢ Flambéing… (14s · ↓ 1.5k tokens · thought for 8s)';
+    const frame = working.lines.map((l) => (l.startsWith('✻ Unravelling') ? live : l));
+    expect(frame).toContain(live);
+    expect(detectScreen({ lines: frame }, BUNDLED_MANIFESTS)).toMatchObject({
+      agent: 'claude', state: 'working', ruleId: 'claude.working.spinner',
+    });
+  });
+
+  // Only a spinner-glyph line vetoes idle. A duration in Claude's own message
+  // ("● Done (2s total).") is not a run.
+  it('reads the prompt as idle under a message that mentions a duration', () => {
+    const s = screen('claude-idle-after-turn');
+    const lines = s.lines.map((l) => (l.startsWith('● ') ? '● Done (2s total).' : l));
+    expect(lines).toContain('● Done (2s total).');
+    expect(detectScreen({ lines }, BUNDLED_MANIFESTS)).toMatchObject({ agent: 'claude', state: 'idle' });
+  });
+
+  // Earlier Claude Code versions closed a turn with "✻ Baked for 3m 10s" or
+  // "✻ Cost: $0.05" (the shapes claude-observer.ts already treats as "Claude
+  // finished responding"), with no "· done" tail.
+  it('reads the prompt as idle under the older turn-done markers', () => {
+    const s = screen('claude-idle-after-turn');
+    for (const marker of ['✻ Baked for 3m 10s', '✻ Worked for 1h 2m', '✻ Cost: $0.05']) {
+      const lines = s.lines.map((l) => (l.startsWith('✻ ') ? marker : l));
+      expect(lines).toContain(marker);
+      expect(detectScreen({ lines }, BUNDLED_MANIFESTS)).toMatchObject({ agent: 'claude', state: 'idle' });
+    }
   });
 
   /**

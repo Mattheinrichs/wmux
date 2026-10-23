@@ -26,13 +26,20 @@ import { Manifest } from '../types';
  *
  * A character class, never a quantified group, so it cannot backtrack. Kept as
  * an explicit set rather than a Unicode block range: the block also contains
- * ordinary dingbats that appear in prose.
+ * ordinary dingbats that appear in prose. ✢ was missing until a live Claude Code
+ * 2.1.305 run in auto mode was sampled frame by frame: "✢ Flambéing… (14s · ↓
+ * 1.5k tokens · thought for 8s)", with no "esc to interrupt" anywhere, so on that
+ * frame no rule saw a run and the empty prompt below read idle.
+ *
+ * The cost, the same as for every glyph here: a transcript line that starts with
+ * one ("✢ Heading") reads as a spinner line, vetoes idle, and with a duration
+ * such as "(2s " in the last lines completes the working rule.
  */
-const SPINNER = '[✳✴✵✶✷✸✹✺✻✼✽·✦✧]';
+const SPINNER = '[✳✴✵✶✷✸✹✺✻✼✽·✦✧✢]';
 
 export const claudeManifest: Manifest = {
   agent: 'claude',
-  version: 1,
+  version: 2,
 
   signatures: [
     // The mode footer. Present in every screen captured, in both modes, and
@@ -100,7 +107,10 @@ export const claudeManifest: Manifest = {
       state: 'working',
       priority: 800,
       region: { id: 'bottom_non_empty_lines', count: 10 },
-      all: [{ kind: 'lineRegex', value: `^\\s*${SPINNER}\\s+\\S` }],
+      // Not a turn-done marker ("✻ Crunched for 2s · done …", see the idle
+      // rule): with one above the prompt, any "(2s " in the last message used
+      // to complete the pair and read a finished turn as working.
+      all: [{ kind: 'lineRegex', value: `^\\s*${SPINNER}\\s+(?!\\S+ for \\d+[hms]\\b|Cost:)\\S` }],
       any: [
         { kind: 'contains', value: 'esc to interrupt' },
         // "(26s · ↓ 1.4k tokens)" — elapsed seconds opening a parenthetical.
@@ -124,11 +134,11 @@ export const claudeManifest: Manifest = {
     },
 
     /**
-     * Idle — an empty prompt box at the bottom of the screen.
+     * Idle — the prompt box at the bottom of the screen, with no run under way.
      *
      * Lowest priority, and it is the only rule that concludes `idle`, so every
-     * shape above gets to disagree first. `none` is what makes it an EMPTY
-     * prompt: a run in progress leaves its footer within the same few lines.
+     * shape above gets to disagree first. `none` is what keeps a run out: a
+     * run in progress leaves its footer within the same few lines.
      */
     {
       id: 'claude.idle.prompt',
@@ -146,12 +156,22 @@ export const claudeManifest: Manifest = {
        */
       region: { id: 'bottom_non_empty_lines', count: 12 },
       all: [
-        // "> " alone on its line, optionally with the cursor block after it.
-        { kind: 'lineRegex', value: '^>\\s*$' },
+        // The prompt box: ">" alone on its line, or ">" + U+00A0 + text. Live
+        // the box is ">" + U+00A0, and after a turn Claude Code pre-fills a
+        // suggested next message there in dim text, which as plain text cannot
+        // be told from a draft and is idle either way. The U+00A0 is what tells
+        // the box from the transcript, which repeats each message the user sent
+        // as ">" + a plain space + text; that echo is not a prompt.
+        { kind: 'lineRegex', value: '^>(\\s*$|\\u00A0)' },
       ],
       none: [
         { kind: 'contains', value: 'esc to interrupt' },
-        { kind: 'lineRegex', value: `^\\s*${SPINNER}\\s+\\S` },
+        // Any spinner-glyph line EXCEPT a turn-done marker, which shares the
+        // glyph and sits above the prompt after every finished turn: "✻
+        // Crunched for 2s · done 12:40 AM" now, "✻ Baked for 3m 10s" or "✻
+        // Cost: $0.05" in earlier versions. Vetoing on one read every post-turn
+        // screen as `unknown`.
+        { kind: 'lineRegex', value: `^\\s*${SPINNER}\\s+(?!\\S+ for \\d+[hms]\\b|Cost:)\\S` },
       ],
     },
   ],
