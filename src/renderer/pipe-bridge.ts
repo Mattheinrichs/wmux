@@ -8,6 +8,7 @@ import { resolveAnchorPane, resolveLayoutSize } from './store/agent-layout-targe
 import { surfaceTerminalRegistry, showPaneNotice } from './hooks/useTerminal';
 import { rollupAgents } from './store/agent-rollup';
 import { toRemoteRosterSource } from './utils/remote-roster';
+import { openLinkFromBridge } from './utils/open-link';
 import { PaneId, SurfaceId, WorkspaceId, SurfaceType, engineOf, type BrowserEngine, type WorkspaceLayout } from '../shared/types';
 import { promptSummary, type PromptEntry, type PromptSource } from './store/prompt-slice';
 import { v4 as uuid } from 'uuid';
@@ -533,6 +534,14 @@ export function initPipeBridge(): void {
     }
     return null;
   };
+
+  /**
+   * A URL an agent or CLI asked wmux to open (`link.open` -> `wmux open`).
+   *
+   * Goes through the same destination rule as a terminal link click, so
+   * `browserPrefs.openLinksExternally` still owns panel-vs-system.
+   */
+  w.__wmux_openLink = openLinkFromBridge;
 
   // ─── Workspace manifests (#284) ─────────────────────────────────────────────
   // Main owns the whole open flow (parse, trust, ordering, typing commands);
