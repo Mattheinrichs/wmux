@@ -101,3 +101,45 @@ describe('toRemoteRosterSource', () => {
     expect(out.blockedReason).toBeNull();
   });
 });
+
+// The phone protocol's state set is closed (RemoteRosterSource.state) and has
+// no `question`. A question refines a DECLARED idle (isCurrentQuestion requires
+// one), so at this boundary it goes back to being that idle: the phone sees the
+// pane exactly as it did before question detection existed. Main's roster marks
+// an agent done on working -> idle, so anything else (`unknown` was tried) cost
+// a turn that ended on a question its "done" toast and moved it out of its
+// section on the phone.
+describe('a question reaches the phone as the idle it refines', () => {
+  it('never puts `question` on the wire, and sends a declared idle in its place', () => {
+    const out = toRemoteRosterSource(
+      entry({ state: 'question', stateSource: 'detected', blockedReason: null, choices: [] }),
+    );
+    expect(out.state).toBe('idle');
+    expect(out.stateSource).toBe('declared');
+    expect(JSON.stringify(out)).not.toContain('question');
+  });
+
+  it('is byte-identical to the same pane read as a declared idle', () => {
+    const asked = toRemoteRosterSource(
+      entry({ state: 'question', stateSource: 'detected', blockedReason: null, choices: [] }),
+    );
+    const idle = toRemoteRosterSource(
+      entry({ state: 'idle', stateSource: 'declared', blockedReason: null, choices: [] }),
+    );
+    expect(asked).toEqual(idle);
+  });
+
+  it('a question offers the phone no answer buttons — it is not a permission prompt', () => {
+    const out = toRemoteRosterSource(
+      entry({ state: 'question', stateSource: 'detected', blockedReason: null, choices: [] }),
+    );
+    expect(out.choices).toEqual([]);
+    expect(out.blockedReason).toBeNull();
+  });
+
+  it('leaves the four states the protocol does name exactly as they are', () => {
+    for (const state of ['blocked', 'working', 'idle', 'unknown'] as const) {
+      expect(toRemoteRosterSource(entry({ state })).state).toBe(state);
+    }
+  });
+});

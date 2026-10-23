@@ -118,9 +118,27 @@ export function sliceRegion(input: DetectionInput, region: Region): string[] {
       return lines.filter((l) => l.trim().length > 0).slice(-count);
     case 'top_non_empty_lines':
       return lines.filter((l) => l.trim().length > 0).slice(0, count);
+    case 'non_empty_lines_above': {
+      // An anchor or start that names its own region would recurse; both are
+      // matched against plain lines, so the field is simply not consulted here.
+      if (!region.anchor) return [];
+      const recent = lines.slice(-LIMITS.MAX_REGION_LINES).filter((l) => l.trim().length > 0);
+      const last = lastMatchBefore(recent, region.anchor, recent.length);
+      if (last < 0) return [];
+      const opened = region.start ? lastMatchBefore(recent, region.start, last) : -1;
+      return recent.slice(Math.max(0, opened, last - count), last);
+    }
     default:
       return [];
   }
+}
+
+/** Index of the last line before `end` that `matcher` hits, or -1. */
+function lastMatchBefore(lines: string[], matcher: Matcher, end: number): number {
+  for (let i = end - 1; i >= 0; i--) {
+    if (matchLine([lines[i]], matcher) !== null) return i;
+  }
+  return -1;
 }
 
 /** One line against one already-prepared matcher. */
@@ -164,21 +182,24 @@ function evaluateRule(input: DetectionInput, rule: Rule): string[] | null {
   if (region.length === 0) return null;
 
   const evidence: string[] = [];
+  // A matcher may look at its own region; an empty one simply never hits.
+  const linesFor = (matcher: Matcher): string[] =>
+    (matcher.region ? sliceRegion(input, matcher.region) : region);
 
   for (const matcher of rule.all ?? []) {
-    const hit = matchLine(region, matcher);
+    const hit = matchLine(linesFor(matcher), matcher);
     if (!hit) return null;
     evidence.push(hit);
   }
 
   if (rule.any && rule.any.length > 0) {
-    const hit = rule.any.map((m) => matchLine(region, m)).find(Boolean);
+    const hit = rule.any.map((m) => matchLine(linesFor(m), m)).find(Boolean);
     if (!hit) return null;
     evidence.push(hit);
   }
 
   for (const matcher of rule.none ?? []) {
-    if (matchLine(region, matcher)) return null;
+    if (matchLine(linesFor(matcher), matcher)) return null;
   }
 
   // A rule with no matchers at all would fire on every screen — treat it as

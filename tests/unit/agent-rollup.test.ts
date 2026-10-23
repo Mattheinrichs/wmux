@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { rollupAgents, workspaceAgentState, surfaceAgentState } from '../../src/renderer/store/agent-rollup';
+import {
+  rollupAgents, workspaceAgentState, surfaceAgentState,
+  isCurrentQuestion, detectionPausedBy, detectionNeedsPublish, withIdleSince, rankedRoster, firstWaiting,
+} from '../../src/renderer/store/agent-rollup';
 import type { DeclaredAgentSnapshot } from '../../src/renderer/store/agent-rollup';
+import { toRemoteRosterSource } from '../../src/renderer/utils/remote-roster';
 import { SplitNode, PaneId, WorkspaceInfo, WorkspaceId } from '../../src/shared/types';
 
 const NOW = 1_000_000;
@@ -27,7 +31,7 @@ const declared = (over: Partial<DeclaredAgentSnapshot> = {}): DeclaredAgentSnaps
 describe('rollupAgents', () => {
   it('reports nothing when no surface has declared a state', () => {
     const out = rollupAgents([ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-a' }]))], {}, NOW);
-    expect(out.totals).toEqual({ blocked: 0, working: 0, idle: 0, unknown: 0, total: 0 });
+    expect(out.totals).toEqual({ blocked: 0, question: 0, working: 0, idle: 0, unknown: 0, total: 0 });
     expect(out.roster).toEqual([]);
     expect(out.blocked).toEqual([]);
   });
@@ -43,9 +47,9 @@ describe('rollupAgents', () => {
       'surf-c': declared({ state: 'idle' }),
     }, NOW);
 
-    expect(out.byWorkspace['ws-1']).toEqual({ blocked: 1, working: 1, idle: 0, unknown: 0, total: 2 });
-    expect(out.byWorkspace['ws-2']).toEqual({ blocked: 0, working: 0, idle: 1, unknown: 0, total: 1 });
-    expect(out.totals).toEqual({ blocked: 1, working: 1, idle: 1, unknown: 0, total: 3 });
+    expect(out.byWorkspace['ws-1']).toEqual({ blocked: 1, question: 0, working: 1, idle: 0, unknown: 0, total: 2 });
+    expect(out.byWorkspace['ws-2']).toEqual({ blocked: 0, question: 0, working: 0, idle: 1, unknown: 0, total: 1 });
+    expect(out.totals).toEqual({ blocked: 1, question: 0, working: 1, idle: 1, unknown: 0, total: 3 });
   });
 
   /**
@@ -60,7 +64,7 @@ describe('rollupAgents', () => {
       'surf-ghost': declared({ state: 'blocked' }),
     }, NOW);
 
-    expect(out.totals).toEqual({ blocked: 1, working: 0, idle: 0, unknown: 0, total: 1 });
+    expect(out.totals).toEqual({ blocked: 1, question: 0, working: 0, idle: 0, unknown: 0, total: 1 });
     expect(out.blocked.map((b) => b.surfaceId)).toEqual(['surf-a']);
   });
 
@@ -153,30 +157,30 @@ describe('rollupAgents', () => {
       'surf-a': declared({ state: 'blocked' }),
       'surf-b': declared({ state: 'working' }),
     }, NOW);
-    expect(out.byWorkspace['ws-1']).toEqual({ blocked: 1, working: 1, idle: 0, unknown: 0, total: 2 });
+    expect(out.byWorkspace['ws-1']).toEqual({ blocked: 1, question: 0, working: 1, idle: 0, unknown: 0, total: 2 });
   });
 
   it('gives every workspace an entry, including those with no agents', () => {
     const out = rollupAgents([ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-a' }]))], {}, NOW);
-    expect(out.byWorkspace['ws-1']).toEqual({ blocked: 0, working: 0, idle: 0, unknown: 0, total: 0 });
+    expect(out.byWorkspace['ws-1']).toEqual({ blocked: 0, question: 0, working: 0, idle: 0, unknown: 0, total: 0 });
   });
 });
 
 describe('workspaceAgentState', () => {
   it('blocked outranks working — one parked agent beats three busy ones', () => {
-    expect(workspaceAgentState({ blocked: 1, working: 3, idle: 0, unknown: 0, total: 4 })).toBe('blocked');
+    expect(workspaceAgentState({ blocked: 1, question: 0, working: 3, idle: 0, unknown: 0, total: 4 })).toBe('blocked');
   });
 
   it('working outranks idle', () => {
-    expect(workspaceAgentState({ blocked: 0, working: 1, idle: 2, unknown: 0, total: 3 })).toBe('working');
+    expect(workspaceAgentState({ blocked: 0, question: 0, working: 1, idle: 2, unknown: 0, total: 3 })).toBe('working');
   });
 
   it('idle when agents exist but none are busy', () => {
-    expect(workspaceAgentState({ blocked: 0, working: 0, idle: 2, unknown: 0, total: 2 })).toBe('idle');
+    expect(workspaceAgentState({ blocked: 0, question: 0, working: 0, idle: 2, unknown: 0, total: 2 })).toBe('idle');
   });
 
   it('null when the workspace hosts no agent at all — the row keeps its shell status', () => {
-    expect(workspaceAgentState({ blocked: 0, working: 0, idle: 0, unknown: 0, total: 0 })).toBeNull();
+    expect(workspaceAgentState({ blocked: 0, question: 0, working: 0, idle: 0, unknown: 0, total: 0 })).toBeNull();
   });
 });
 
@@ -191,7 +195,7 @@ describe('rollupAgents — identity (phase 2)', () => {
     const out = rollupAgents([ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-a' }]))], {}, NOW, {
       'surf-a': ident('codex'),
     });
-    expect(out.totals).toEqual({ blocked: 0, working: 0, idle: 0, unknown: 1, total: 1 });
+    expect(out.totals).toEqual({ blocked: 0, question: 0, working: 0, idle: 0, unknown: 1, total: 1 });
     expect(out.roster[0]).toMatchObject({ state: 'unknown', kind: 'codex', identitySource: 'command' });
   });
 
@@ -260,17 +264,202 @@ describe('rollupAgents — identity (phase 2)', () => {
     }, NOW, { 'surf-silent': ident('codex') });
 
     expect(out.blocked.map((b) => b.surfaceId)).toEqual(['surf-blocked']);
-    expect(out.totals).toEqual({ blocked: 1, working: 0, idle: 0, unknown: 1, total: 2 });
+    expect(out.totals).toEqual({ blocked: 1, question: 0, working: 0, idle: 0, unknown: 1, total: 2 });
   });
 });
 
 describe('workspaceAgentState — unknown', () => {
   it('a workspace of silent agents reads as unknown, not idle', () => {
-    expect(workspaceAgentState({ blocked: 0, working: 0, idle: 0, unknown: 2, total: 2 })).toBe('unknown');
+    expect(workspaceAgentState({ blocked: 0, question: 0, working: 0, idle: 0, unknown: 2, total: 2 })).toBe('unknown');
   });
 
   it('one declared idle outranks any number of silent agents', () => {
-    expect(workspaceAgentState({ blocked: 0, working: 0, idle: 1, unknown: 5, total: 6 })).toBe('idle');
+    expect(workspaceAgentState({ blocked: 0, question: 0, working: 0, idle: 1, unknown: 5, total: 6 })).toBe('idle');
+  });
+});
+
+describe('rollupAgents — current question (same surface, same session, same turn)', () => {
+  const IDLE_SINCE = NOW - 10_000;
+  const SESSION = '11111111-1111-1111-1111-111111111111';
+  /** What the screen said, and when and for which session the renderer saw it. */
+  const seen = (
+    state: 'question' | 'blocked' | 'working' | 'idle' | 'unknown',
+    over: { observedAt?: number; sessionId?: string | null } = { observedAt: IDLE_SINCE + 400, sessionId: SESSION },
+  ) => ({ agent: 'claude', state, ...over });
+  const idle = (over: Partial<DeclaredAgentSnapshot> = {}) =>
+    declared({ state: 'idle', idleSince: IDLE_SINCE, sessionId: SESSION, ...over });
+  const tree = () => [ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-a' }]))];
+  const stateOf = (decl: DeclaredAgentSnapshot, det: ReturnType<typeof seen>) =>
+    rollupAgents(tree(), { 'surf-a': decl }, NOW, {}, { 'surf-a': det }).roster[0].state;
+
+  it('a question seen after this turn ended, for this session, refines a declared idle everywhere at once', () => {
+    const decl = idle();
+    const out = rollupAgents(tree(), { 'surf-a': decl }, NOW, {}, { 'surf-a': seen('question') });
+
+    expect(out.roster[0]).toMatchObject({ surfaceId: 'surf-a', state: 'question', detectedState: 'question' });
+    expect(out.byWorkspace['ws-1'].question).toBe(1);
+    expect(out.byWorkspace['ws-1'].idle).toBe(0);
+    expect(workspaceAgentState(out.byWorkspace['ws-1'])).toBe('question');
+    expect(surfaceAgentState(decl, seen('question'))).toMatchObject({ state: 'question' });
+    // not a permission prompt: no "Needs you" queue entry, no answer choices
+    expect(out.blocked).toHaveLength(0);
+  });
+
+  it('ranks a question after every permission prompt and ahead of work that proceeds on its own', () => {
+    const out = rollupAgents(
+      [ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-w' }, { id: 'surf-a' }, { id: 'surf-i' }, { id: 'surf-b' }]))],
+      {
+        'surf-w': declared({ state: 'working' }),
+        'surf-a': idle(),
+        'surf-i': declared({ state: 'idle' }),
+        'surf-b': declared({ state: 'blocked', blockedSince: NOW - 5_000 }),
+      },
+      NOW, {}, { 'surf-a': seen('question') },
+    );
+
+    expect(rankedRoster(out).map((e) => e.surfaceId)).toEqual(['surf-b', 'surf-a', 'surf-w', 'surf-i']);
+    expect(rankedRoster(out)).toHaveLength(out.roster.length);
+  });
+
+  // The stored verdict is whatever the screen said the last time it was read.
+  // If that was before the agent's current idle period began, it describes an
+  // earlier turn, however recent it looks.
+  it('a question seen BEFORE this idle period began is an earlier turn, and reads as idle', () => {
+    const stale = seen('question', { observedAt: IDLE_SINCE - 1, sessionId: SESSION });
+    expect(stateOf(idle(), stale)).toBe('idle');
+    expect(surfaceAgentState(idle(), stale)).toMatchObject({ state: 'idle', source: 'declared' });
+    expect(isCurrentQuestion(idle(), stale)).toBe(false);
+  });
+
+  it('a question seen for another session on the same surface reads as idle', () => {
+    const other = seen('question', { observedAt: IDLE_SINCE + 400, sessionId: '22222222-2222-2222-2222-222222222222' });
+    expect(stateOf(idle(), other)).toBe('idle');
+    expect(surfaceAgentState(idle(), other)).toMatchObject({ state: 'idle' });
+  });
+
+  it('evidence that cannot be placed in time or in a session is never promoted', () => {
+    expect(stateOf(idle(), seen('question', {}))).toBe('idle');
+    expect(stateOf(idle(), seen('question', { observedAt: IDLE_SINCE + 400 }))).toBe('idle');
+    expect(stateOf(idle({ idleSince: undefined }), seen('question'))).toBe('idle');
+    // a non-finite stamp is not a time
+    expect(stateOf(idle(), seen('question', { observedAt: Number.NaN, sessionId: SESSION }))).toBe('idle');
+  });
+
+  it('an agent with no session on record matches only evidence that also has none', () => {
+    const anonymous = idle({ sessionId: null });
+    expect(stateOf(anonymous, seen('question', { observedAt: IDLE_SINCE + 400, sessionId: null }))).toBe('question');
+    expect(stateOf(anonymous, seen('question'))).toBe('idle');
+  });
+
+  // Codex round 1, P1: with no declared idle there is no turn and no session to
+  // place the screen's question in, so it must not become one. The remote then
+  // stamped it `declared`, a claim no agent made.
+  it('a question on the screen of an agent that declared nothing reads as the idle it refines, and says it was seen', () => {
+    const out = rollupAgents(tree(), {}, NOW, {}, { 'surf-a': seen('question') });
+    expect(out.roster[0]).toMatchObject({ state: 'idle', stateSource: 'detected', detectedState: 'question' });
+    expect(out.byWorkspace['ws-1'].question).toBe(0);
+    expect(surfaceAgentState(undefined, seen('question'))).toEqual({ state: 'idle', source: 'detected' });
+    expect(toRemoteRosterSource(out.roster[0])).toMatchObject({ state: 'idle', stateSource: 'detected' });
+    const unknown = rollupAgents(tree(), { 'surf-a': declared({ state: 'unknown' }) }, NOW, {}, { 'surf-a': seen('question') });
+    expect(unknown.roster[0]).toMatchObject({ state: 'idle', stateSource: 'detected' });
+  });
+
+  // Codex round 1, P2: with only a question waiting, the banner read
+  // "0 working · 1 asking" over a disabled button titled "No agent is waiting".
+  it('the banner jumps to the oldest permission prompt, else to the first question, else nowhere', () => {
+    const many = (states: Record<string, DeclaredAgentSnapshot>, dets = {}) => rollupAgents(
+      [ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-w' }, { id: 'surf-a' }, { id: 'surf-b' }]))], states, NOW, {}, dets,
+    );
+    const asking = many({ 'surf-w': declared({ state: 'working' }), 'surf-a': idle() }, { 'surf-a': seen('question') });
+    expect(firstWaiting(asking)?.surfaceId).toBe('surf-a');
+    const both = many({ 'surf-a': idle(), 'surf-b': declared({ state: 'blocked' }) }, { 'surf-a': seen('question') });
+    expect(firstWaiting(both)?.surfaceId).toBe('surf-b');
+    expect(firstWaiting(many({ 'surf-w': declared({ state: 'working' }) }))).toBeUndefined();
+  });
+
+  it('never overrides a declared working or blocked, and a question needs the user before work in the same workspace', () => {
+    const working = rollupAgents(tree(), { 'surf-a': declared({ state: 'working', sessionId: SESSION }) }, NOW, {}, { 'surf-a': seen('question') });
+    expect(working.roster[0].state).toBe('working');
+    const blocked = rollupAgents(tree(), { 'surf-a': declared({ state: 'blocked', sessionId: SESSION }) }, NOW, {}, { 'surf-a': seen('question') });
+    expect(blocked.roster[0].state).toBe('blocked');
+    expect(workspaceAgentState({ blocked: 0, question: 1, working: 1, idle: 0, unknown: 0, total: 2 })).toBe('question');
+  });
+});
+
+describe('the scan loop\'s part in keeping a question current', () => {
+  // An idle agent is the one place a question can be hiding, so it must be
+  // looked at. Working and blocked stay unscanned, as before.
+  it('pauses scanning for working and blocked, not for idle, unknown or silence', () => {
+    expect(detectionPausedBy('working')).toBe(true);
+    expect(detectionPausedBy('blocked')).toBe(true);
+    expect(detectionPausedBy('idle')).toBe(false);
+    expect(detectionPausedBy('unknown')).toBe(false);
+    expect(detectionPausedBy(undefined)).toBe(false);
+  });
+
+  it('stamps the start of an idle period once, and keeps it across later idle reports', () => {
+    const first = withIdleSince(undefined, declared({ state: 'idle', updatedAt: 500 }), 9_000);
+    expect(first.idleSince).toBe(9_000);
+    // a metadata-only report bumps updatedAt while the agent is still idle
+    const again = withIdleSince(first, declared({ state: 'idle', updatedAt: 700 }), 9_500);
+    expect(again.idleSince).toBe(9_000);
+    const working = withIdleSince(again, declared({ state: 'working', updatedAt: 800 }), 9_600);
+    expect(working.idleSince).toBeUndefined();
+    const nextTurn = withIdleSince(working, declared({ state: 'idle', updatedAt: 900 }), 9_900);
+    expect(nextTurn.idleSince).toBe(9_900);
+  });
+
+  // Codex round 1, P1: a resumed or restarted session that goes straight from
+  // idle to idle kept the old period, so its question was never republished.
+  it('starts a new idle period when the session changes, even from idle to idle', () => {
+    const first = withIdleSince(undefined, declared({ state: 'idle', sessionId: 'old' }), 9_000);
+    const same = withIdleSince(first, declared({ state: 'idle', sessionId: 'old' }), 9_500);
+    expect(same.idleSince).toBe(9_000);
+    const resumed = withIdleSince(same, declared({ state: 'idle', sessionId: 'new' }), 9_800);
+    expect(resumed.idleSince).toBe(9_800);
+    // and the question the new session asks is republished under its stamp
+    const q = { agent: 'claude', state: 'question' as const, ruleId: 'claude.question.pending', observedAt: 9_200 };
+    expect(detectionNeedsPublish(q, { ...q, observedAt: undefined }, resumed.idleSince)).toBe(true);
+  });
+
+  // Codex rounds 2 and 3. Round 2 asked for the same question to be reread
+  // after that session change even with no new output; round 3 showed what
+  // that does: it restamps the previous session's pixels as the new one's. So
+  // the scan loop still rereads on output only, and until the new session
+  // prints, its pane reads as the idle it declared. This pins the refusal.
+  it('keeps the previous session\'s question off the new session until the screen is read again', () => {
+    const resumed = withIdleSince(
+      withIdleSince(undefined, declared({ state: 'idle', sessionId: 'old' }), 9_000),
+      declared({ state: 'idle', sessionId: 'new' }), 9_800,
+    );
+    const askedBefore = { agent: 'claude', state: 'question' as const, observedAt: 9_200, sessionId: 'old' };
+    expect(isCurrentQuestion(resumed, askedBefore)).toBe(false);
+    expect(surfaceAgentState(resumed, askedBefore)).toEqual({ state: 'idle', source: 'declared' });
+  });
+
+  it('republishes a question whose stored stamp predates the current idle period, even when nothing else moved', () => {
+    const q = { agent: 'claude', state: 'question' as const, ruleId: 'claude.question.pending', evidence: ['a ?'] };
+    const stored = { ...q, observedAt: 1_000 };
+    expect(detectionNeedsPublish(stored, q, 500)).toBe(false);
+    expect(detectionNeedsPublish(stored, q, 2_000)).toBe(true);
+    expect(detectionNeedsPublish(null, q, undefined)).toBe(true);
+    // an unchanged non-question verdict is left alone, as before
+    const w = { agent: 'claude', state: 'working' as const, ruleId: 'r', evidence: ['x'] };
+    const wMoved = { ...w, evidence: ['y'] };
+    expect(detectionNeedsPublish({ ...w, observedAt: 1 }, wMoved, 2_000)).toBe(false);
+  });
+
+  it('does not republish a question on every keystroke of the answer being typed under it', () => {
+    // The prompt line is part of the rule's evidence, and it carries the
+    // answer as it is typed. Within one idle period that changes nothing a
+    // consumer reads, so it must not cost a store write per scan tick.
+    const asked = {
+      agent: 'claude', state: 'question' as const, ruleId: 'claude.question.pending',
+      evidence: ['✻ Crunched for 2s · done 12:40 AM', '> ', 'Ce deuxième essai est-il réussi ?'],
+    };
+    const stored = { ...asked, observedAt: 1_000 };
+    const typing = { ...asked, evidence: ['✻ Crunched for 2s · done 12:40 AM', '> Oui, je le', 'Ce deuxième essai est-il réussi ?'] };
+    expect(detectionNeedsPublish(stored, typing, 500)).toBe(false);
   });
 });
 
@@ -281,7 +470,7 @@ describe('rollupAgents — detection merge (phase 3)', () => {
     const out = rollupAgents([ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-a' }]))], {}, NOW, {}, {
       'surf-a': det('working', 'codex'),
     });
-    expect(out.totals).toEqual({ blocked: 0, working: 1, idle: 0, unknown: 0, total: 1 });
+    expect(out.totals).toEqual({ blocked: 0, question: 0, working: 1, idle: 0, unknown: 0, total: 1 });
     expect(out.roster[0]).toMatchObject({
       kind: 'codex', state: 'working', stateSource: 'detected', detectedState: 'working',
     });

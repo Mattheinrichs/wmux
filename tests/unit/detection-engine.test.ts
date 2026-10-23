@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { detectScreen, isSafeRegexSource, sliceRegion } from '../../src/shared/detection/engine';
 import { BUNDLED_MANIFESTS } from '../../src/shared/detection/manifests';
-import { LIMITS, Manifest } from '../../src/shared/detection/types';
+import { LIMITS, Manifest, Matcher, Region } from '../../src/shared/detection/types';
 
 const FIXTURES = path.join(__dirname, '..', 'fixtures', 'detection');
 
@@ -154,6 +154,152 @@ describe('detectScreen — Claude Code', () => {
       ],
     }, BUNDLED_MANIFESTS);
     expect(out.state).not.toBe('blocked');
+  });
+});
+
+describe('detectScreen — current business question', () => {
+  it('reads a finished turn that ends on a question, over an empty prompt, as a question rather than idle', () => {
+    const out = read('wmux-current-question-pending');
+    expect(out).toMatchObject({ agent: 'claude', state: 'question', ruleId: 'claude.question.pending' });
+  });
+
+  // The shape of the screen that started this: the question is followed by
+  // more text on its own line, so "the line ends in ?" never saw it.
+  it('reads a question that is followed by more text on the same line', () => {
+    const out = read('wmux-current-question-inline');
+    expect(out).toMatchObject({ agent: 'claude', state: 'question', ruleId: 'claude.question.pending' });
+    expect(out.evidence.some((l) => l.includes('Je fais ces modifications ?'))).toBe(true);
+  });
+
+  // The question belongs to the PREVIOUS turn: the user answered it and a later
+  // turn finished without asking anything. It is still inside the bottom window.
+  it('does not read an answered question from an earlier turn as current', () => {
+    expect(read('wmux-current-question-stale').state).not.toBe('question');
+  });
+
+  it('does not read a quoted past question as current', () => {
+    expect(read('wmux-current-question-quoted').state).not.toBe('question');
+  });
+
+  // The user's own submitted prompt sits right above a short answer. It ends in
+  // a question mark and it is not Claude asking anything.
+  it('does not take the user\'s own submitted question for the agent\'s', () => {
+    const out = detectScreen({
+      lines: [
+        '> Tu peux relire le document A ?',
+        '',
+        '● C\'est relu, rien à signaler.',
+        '',
+        '✻ Baked for 22s · done 3:46 PM',
+        '',
+        '──────────────────────────────',
+        '> ',
+        '──────────────────────────────',
+        '  ⏵⏵ auto mode on (shift+tab to cycle)',
+      ],
+    }, BUNDLED_MANIFESTS);
+    expect(out.state).not.toBe('question');
+  });
+
+  // Codex round 1, P1: "three lines above the marker" reached past a one-line
+  // answer into the wrapped continuation of the user's prompt, which carries no
+  // prompt glyph of its own.
+  it('does not take the wrapped continuation of the user\'s prompt for the agent\'s question', () => {
+    const out = detectScreen({
+      lines: [
+        '> Please answer briefly:',
+        '  Should the build pass?',
+        '',
+        '● Done.',
+        '',
+        '✻ Baked for 1s · done 3:46 PM',
+        '',
+        '──────────────────────────────',
+        '> ',
+        '──────────────────────────────',
+        '  ⏵⏵ auto mode on (shift+tab to cycle)',
+      ],
+    }, BUNDLED_MANIFESTS);
+    expect(out.state).not.toBe('question');
+  });
+
+  // PR #326 review (GitHub Codex): Claude answering in Chinese or Japanese
+  // closes on a full-width `？`, in Arabic on `؟`, and both read as idle.
+  it('reads a question closed by a full-width or Arabic question mark', () => {
+    const asked = (line: string) => detectScreen({
+      lines: [`● ${line}`, '', '✻ Baked for 2s · done 3:46 PM', '', '> ', '  ⏵⏵ auto mode on (shift+tab to cycle)'],
+    }, BUNDLED_MANIFESTS).state;
+    expect(asked('要我现在修改这两个文件吗？')).toBe('question');
+    // CJK runs straight on after the mark, with no space to require
+    expect(asked('要我现在修改吗？还没有改动任何文件。')).toBe('question');
+    expect(asked('هل أبدأ التعديل الآن؟')).toBe('question');
+    // closed by a corner bracket, it is a quoted question, as with » or ”
+    expect(asked('你之前问过「要修改吗？」，答案是可以。')).not.toBe('question');
+  });
+
+  it('does not take a question printed by a tool for the agent\'s', () => {
+    const out = detectScreen({
+      lines: [
+        '● Bash(npm init)',
+        '  ⎿  Is this OK? (yes)',
+        '',
+        '✻ Baked for 3s · done 3:46 PM',
+        '',
+        '> ',
+        '  ⏵⏵ auto mode on (shift+tab to cycle)',
+      ],
+    }, BUNDLED_MANIFESTS);
+    expect(out.state).not.toBe('question');
+  });
+
+  // After a closed question Claude Code pre-fills a suggested answer on the
+  // prompt line, and plain text cannot tell it from typing. Captured live
+  // (Claude Code 2.1.304): ">" + U+00A0 + the suggestion, under the question.
+  it('reads a question as current while Claude Code suggests an answer on the prompt line', () => {
+    const out = read('wmux-current-question-suggested');
+    expect(out).toMatchObject({ agent: 'claude', state: 'question', ruleId: 'claude.question.pending' });
+    expect(out.evidence.some((l) => l.includes('Ce deuxième essai est-il réussi ?'))).toBe(true);
+  });
+
+  // A typed draft keeps the box's U+00A0: captured live (Claude Code 2.1.305)
+  // as ">" + U+00A0 + "oui mais".
+  it('keeps the question current until the answer is sent, even once the user types', () => {
+    const lines = screen('wmux-current-question-inline').lines.map((l) => (l === '> ' ? '> oui mais' : l));
+    expect(lines).toContain('> oui mais');
+    expect(detectScreen({ lines }, BUNDLED_MANIFESTS)).toMatchObject({
+      state: 'question', ruleId: 'claude.question.pending',
+    });
+  });
+
+  // The transcript repeats each message the user sent as "> " + text, with a
+  // plain space. With no prompt box on screen (a dialog no rule knows), that
+  // echo is not a prompt, and the question is not read.
+  it('reads no question when the only ">" line is the user’s echoed message', () => {
+    const s = screen('wmux-current-question-suggested');
+    const lines = s.lines.filter((l) => !l.startsWith('> '));
+    expect(lines).toHaveLength(s.lines.length - 1);
+    expect(lines.some((l) => l.startsWith('> Deuxième essai'))).toBe(true);
+    expect(detectScreen({ lines }, BUNDLED_MANIFESTS).state).not.toBe('question');
+  });
+
+  // Sent: the answer is now in the transcript and a new turn has closed under
+  // it without asking anything, so the question is above an older marker.
+  it('lets the question go once the answer is sent and the next turn ends', () => {
+    const lines = screen('wmux-current-question-suggested').lines;
+    const prompt = lines.findIndex((l) => l.startsWith('> '));
+    const sent = [
+      ...lines.slice(0, prompt - 1),
+      '> Oui, c\'est réussi.',
+      '',
+      '● Parfait, merci.',
+      '',
+      '✻ Baked for 2s · done 12:41 AM',
+      '',
+      ...lines.slice(prompt - 1, prompt),
+      '> ',
+      ...lines.slice(prompt + 1),
+    ];
+    expect(detectScreen({ lines: sent }, BUNDLED_MANIFESTS).state).not.toBe('question');
   });
 });
 
@@ -312,6 +458,24 @@ describe('sliceRegion', () => {
     expect(sliceRegion(input, { id: 'top_non_empty_lines', count: 2 })).toEqual(['a', 'b']);
   });
 
+  it('non_empty_lines_above reads just above the LAST anchor match, and nothing without one', () => {
+    const anchor = { kind: 'contains' as const, value: 'MARK' };
+    const lines = ['a', 'MARK 1', 'b', '', 'c', 'd', 'MARK 2', 'e'];
+    expect(sliceRegion({ lines }, { id: 'non_empty_lines_above', count: 2, anchor })).toEqual(['c', 'd']);
+    expect(sliceRegion({ lines: ['a', 'b'] }, { id: 'non_empty_lines_above', count: 2, anchor })).toEqual([]);
+    expect(sliceRegion({ lines }, { id: 'non_empty_lines_above', count: 2 })).toEqual([]);
+  });
+
+  it('non_empty_lines_above opens no higher than the nearest `start` above the anchor, and ignores a start it cannot see', () => {
+    const anchor = { kind: 'contains' as const, value: 'MARK' };
+    const start = { kind: 'lineStartsWith' as const, value: 'S' };
+    const lines = ['S old', 'a', 'b', 'S new', 'c', 'MARK'];
+    expect(sliceRegion({ lines }, { id: 'non_empty_lines_above', count: 3, anchor, start })).toEqual(['S new', 'c']);
+    // a start only BELOW the anchor bounds nothing
+    expect(sliceRegion({ lines: ['a', 'b', 'MARK', 'S after'] }, { id: 'non_empty_lines_above', count: 2, anchor, start }))
+      .toEqual(['a', 'b']);
+  });
+
   it('osc_title yields the trimmed title, or nothing', () => {
     expect(sliceRegion(input, { id: 'osc_title' })).toEqual(['Claude Code']);
     expect(sliceRegion({ lines: [] }, { id: 'osc_title' })).toEqual([]);
@@ -333,11 +497,20 @@ describe('sliceRegion', () => {
  */
 describe('isSafeRegexSource', () => {
   it('accepts the patterns the bundled manifests use', () => {
+    // A region's anchor and start are matchers too, on a rule or on a matcher.
+    const withRegions = (m: Matcher): Matcher[] => [m, ...regionMatchers(m.region)];
+    const regionMatchers = (r: Region | undefined): Matcher[] =>
+      [r?.anchor, r?.start].filter((x): x is Matcher => !!x).flatMap(withRegions);
     for (const manifest of BUNDLED_MANIFESTS) {
       const sources = [
         ...manifest.signatures,
-        ...manifest.rules.flatMap((r) => [...(r.all ?? []), ...(r.any ?? []), ...(r.none ?? [])]),
+        ...manifest.rules.flatMap((r) => [
+          ...regionMatchers(r.region),
+          ...[...(r.all ?? []), ...(r.any ?? []), ...(r.none ?? [])].flatMap(withRegions),
+        ]),
       ].filter((m) => m.kind === 'lineRegex').map((m) => m.value);
+      // the walk reaches nested matchers: Claude's question region has a start
+      if (manifest.agent === 'claude') expect(sources).toContain('^[●⏺]\\s');
 
       for (const source of sources) {
         expect(isSafeRegexSource(source), `${manifest.agent}: ${source}`).toBe(true);

@@ -312,6 +312,15 @@
   font-weight: 600;
 }
 
+/* "Question for you" — an agent ended its turn on an ordinary question. Its own
+   colour on purpose: violet is a permission prompt (work has stopped until a key
+   is pressed), amber is work in progress, and this is neither. Not bold and not
+   animated — it waits for the user, but nothing is blocked behind it. The
+   fallback is here rather than in the themes so an older theme still draws it. */
+.workspace-row__status--question {
+  color: var(--ui-agent-question, #4fb3d9);
+}
+
 .workspace-row__status--interrupted {
   color: #e53935;
 }
@@ -670,6 +679,11 @@
   .workspace-row__state-dot--blocked { animation: none; }
 }
 
+/* Matches the "Question for you" status text beside it; steady, not pulsing. */
+.workspace-row__state-dot--question {
+  background: var(--ui-agent-question, #4fb3d9);
+}
+
 .workspace-row__state-dot--idle {
   background: #4caf50;
 }
@@ -734,6 +748,16 @@
 }
 .workspace-row__session--blocked .workspace-row__agent-detail {
   color: var(--ui-agent-blocked);
+  opacity: 1;
+}
+/* A question on the session that asked it: the header's colour, and steady,
+   since it waits for the user without anything blocked behind it. */
+.workspace-row__agent-dot--question {
+  background: var(--ui-agent-question, #4fb3d9);
+  animation: none;
+}
+.workspace-row__session--question .workspace-row__agent-detail {
+  color: var(--ui-agent-question, #4fb3d9);
   opacity: 1;
 }
 /* Answer buttons for a blocked pane (issue #128, the back-channel).
@@ -1451,6 +1475,14 @@
 .agent-roster[data-blocked='true'] .agent-roster__dot {
   background: var(--ui-agent-blocked);
   animation: pulse-blocked-dot 2s ease-in-out infinite;
+}
+
+/* Only questions waiting: their colour, steady, as on the rows below. */
+.agent-roster[data-question='true'] .agent-roster__dot {
+  background: var(--ui-agent-question, #4fb3d9);
+}
+.agent-roster[data-question='true'] .agent-roster__count {
+  color: var(--ui-agent-question, #4fb3d9);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -240,6 +240,13 @@ export interface RemoteRosterSource {
   workspaceTitle: string;
   label: string;
   kind: string | null;
+  /**
+   * A CLOSED set, and narrower than the desktop's: the desktop roster also has
+   * `question` (an agent that ended its turn on an ordinary question). The
+   * phone has no such state, so `toRemoteRosterSource` sends it as the declared
+   * `idle` it refines. Adding it here is a protocol change —
+   * main's validation and the phone UI both have to learn it first.
+   */
   state: 'blocked' | 'working' | 'idle' | 'unknown';
   stateSource: 'declared' | 'detected' | null;
   blockedReason: string | null;
