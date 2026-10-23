@@ -204,6 +204,7 @@ const shellPathCache = new Map<string, string | undefined>();
 /** Drop every memoized resolution. For tests, and for a shell-config reload. */
 export function resetShellPathCache(): void {
   shellPathCache.clear();
+  cachedDefaultShell = null;
 }
 
 /** Absolute path of a real file node-pty can spawn, or undefined. Memoized. */
@@ -310,8 +311,20 @@ function resolveBashAlias(shell: string, alias: 'bash' | 'git-bash'): string | u
   return gitBashProbe.find() ?? hit;
 }
 
+/**
+ * The "System default" shell, memoized like every other resolution (#176) and
+ * re-validated the same way (#334). For a Store-only PowerShell the memoized
+ * value is the VERSIONED exe behind the alias, and a Store update deletes that
+ * directory while wmux runs: without this check every pane created after the
+ * update died on node-pty's "File not found" until a restart. A miss re-runs
+ * the candidates, whose own per-spec cache re-probes for the same reason. The
+ * bare last-resort names are not paths, so they are never re-checked.
+ */
 function getDefaultShell(): string {
-  if (cachedDefaultShell) return cachedDefaultShell;
+  if (cachedDefaultShell) {
+    if (!path.isAbsolute(cachedDefaultShell) || fs.existsSync(cachedDefaultShell)) return cachedDefaultShell;
+    cachedDefaultShell = null;
+  }
   const candidates = process.platform === 'win32'
     ? ['pwsh.exe', 'powershell.exe', 'cmd.exe']
     : [process.env.SHELL || '/bin/sh'];

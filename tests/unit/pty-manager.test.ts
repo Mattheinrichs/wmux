@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { PtyManager, parseShellSpec, resolveSpawnCwd, resolveShellForCwd, resolveExistingShellPath, comparePackageVersion, appExecAliasTarget, shellEnv, shellProbe, resetShellPathCache } from '../../src/main/pty-manager';
+import { PtyManager, parseShellSpec, resolveSpawnCwd, resolveShell, resolveShellForCwd, resolveExistingShellPath, comparePackageVersion, appExecAliasTarget, shellEnv, shellProbe, resetShellPathCache } from '../../src/main/pty-manager';
 import type { SurfaceId } from '../../src/shared/types';
 
 const TEST_SHELL = 'cmd.exe';
@@ -535,6 +535,29 @@ describe('shell path resolution is memoized (issue #176)', () => {
       expect(probes).toHaveLength(2);
     } finally {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    }
+  });
+
+  it('re-resolves the "System default" shell when its cached exe disappears (#334)', () => {
+    // A Store PowerShell update removes the versioned WindowsApps directory the
+    // default shell was memoized as; the next pane must not spawn that path.
+    const before = path.join(os.tmpdir(), `wmux-default-old-${process.pid}.exe`);
+    const after = path.join(os.tmpdir(), `wmux-default-new-${process.pid}.exe`);
+    fs.writeFileSync(before, '');
+    let current = before;
+    try {
+      vi.mocked(shellProbe.onPath).mockImplementation((name: string) =>
+        name === 'pwsh.exe' || name === process.env.SHELL || name === '/bin/sh' ? current : undefined,
+      );
+      expect(resolveShell(undefined)).toBe(before);
+      expect(resolveShell(undefined)).toBe(before);
+
+      fs.unlinkSync(before);
+      fs.writeFileSync(after, '');
+      current = after;
+      expect(resolveShell(undefined)).toBe(after);
+    } finally {
+      for (const p of [before, after]) if (fs.existsSync(p)) fs.unlinkSync(p);
     }
   });
 
