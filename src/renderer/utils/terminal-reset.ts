@@ -48,9 +48,25 @@
  * DECSC clobbers whatever the shell had saved in that slot. That is a real but
  * cheap cost: shells re-save around every prompt, and a pane the user has asked
  * to force-reset has already lost more than one cursor bookmark.
+ *
+ * ## The alternate screen is not a mode a live program re-asserts (#347)
+ *
+ * Most of the modes above are cheap to drop under a running program: it puts
+ * back the ones it wants on its next redraw, or the user notices and restarts
+ * it. `?1049` is different. A fullscreen program (Claude Code, opencode, vim)
+ * sends `?1049h` once, at startup, and never again — so a manual reset that
+ * left the alternate buffer under it sent every later frame into the shell's
+ * scrollback, and its exit `?1049l` found no alternate screen to leave and only
+ * homed the cursor, printing the prompt over the stale frame. The PTY-exit path
+ * always leaves (there is no program); the manual reset leaves only when the
+ * shell has positively said it is back at its prompt. An UNKNOWN state keeps the
+ * alternate screen: a program started before the shell's first prompt (a
+ * restored `claude --resume`, run by the PowerShell integration during init)
+ * has never been announced as running, and is exactly the case to protect.
  */
 
 import type { Terminal } from '@xterm/xterm';
+import type { ShellState } from './surface-shell-state';
 
 /**
  * Mode resets that are safe to send in any state, in the order they are sent.
@@ -100,15 +116,32 @@ export function terminalResetSequence(onAlternateBuffer: boolean): string {
 }
 
 /**
+ * May a manual reset leave the alternate screen? Only when the pane's shell has
+ * reported it is back at its prompt — then whatever entered the alternate
+ * screen is gone (#175). `running` means it is still drawing there, and no
+ * report at all means wmux cannot tell (#347), so both keep it.
+ */
+export function shellOwnsScreen(shellState: ShellState | undefined): boolean {
+  return shellState === 'idle' || shellState === 'interrupted';
+}
+
+export interface ResetOptions {
+  /**
+   * Stay on the alternate buffer even if the terminal is on it, because a
+   * program may still be drawing there (#347). Every other mode is still reset.
+   */
+  keepAlternateScreen?: boolean;
+}
+
+/**
  * Put `terminal` back into a usable state.
  *
  * Writes into the terminal, never to the PTY — this changes what wmux's own
  * emulator believes, and must not be visible to whatever is still running on
- * the other end. A live application's next redraw simply re-asserts the modes
- * it wants, which is the correct outcome: reset while `vim` is up and `vim`
- * repaints.
+ * the other end. A live application's next redraw re-asserts most of the modes
+ * it wants; the alternate screen is the exception, see `keepAlternateScreen`.
  */
-export function resetTerminalModes(terminal: Terminal): void {
+export function resetTerminalModes(terminal: Terminal, options: ResetOptions = {}): void {
   let onAlternateBuffer = false;
   try {
     onAlternateBuffer = terminal.buffer.active.type === 'alternate';
@@ -118,7 +151,7 @@ export function resetTerminalModes(terminal: Terminal): void {
     // branch rather than a degraded one.
   }
   try {
-    terminal.write(terminalResetSequence(onAlternateBuffer));
+    terminal.write(terminalResetSequence(onAlternateBuffer && !options.keepAlternateScreen));
   } catch {
     // A disposed terminal throws on write. Recovery of a pane that no longer
     // exists is a no-op by definition, not an error worth surfacing.

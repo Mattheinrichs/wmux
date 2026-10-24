@@ -24,8 +24,8 @@ import {
   mouseModeReplaySequence,
 } from '../utils/mouse-modes';
 import { attachVisibleRenderer, RendererHandle } from '../utils/terminal-renderer';
-import { resetTerminalModes } from '../utils/terminal-reset';
-import { forgetSurfaceShellState, treeSurfaceIds, workspaceShellState } from '../utils/surface-shell-state';
+import { resetTerminalModes, shellOwnsScreen } from '../utils/terminal-reset';
+import { forgetSurfaceShellState, previousSurfaceShellState, treeSurfaceIds, workspaceShellState } from '../utils/surface-shell-state';
 import { forgetProgressTurn, noteSurfaceProgress } from '../utils/progress-turn';
 import { windowsPtyCompat } from '../utils/windows-pty';
 import { ReplayHold } from '../utils/replay-hold';
@@ -1938,7 +1938,11 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
       if (detail?.surfaceId !== surfaceId) return;
       const term = xtermRef.current;
       if (!term) return;
-      resetTerminalModes(term);
+      // The program that entered the alternate screen may still be running and
+      // will never re-send ?1049h (#347): leave it only once the shell is back
+      // at its prompt.
+      const keepAlternateScreen = !surfaceId || !shellOwnsScreen(previousSurfaceShellState(surfaceId));
+      resetTerminalModes(term, { keepAlternateScreen });
       // Drop the replay cache too, or the next remount puts the modes straight
       // back — same coupling as the exit path.
       if (surfaceId) {

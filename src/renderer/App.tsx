@@ -87,6 +87,10 @@ function applyUserConfigTerminal(state: ReturnType<typeof useStore.getState>, te
   if (terminal.cursorBlink !== undefined) patch.cursorBlink = terminal.cursorBlink;
   if (terminal.scrollbackLines !== undefined) patch.scrollbackLines = terminal.scrollbackLines;
   if (terminal.touchPanGain !== undefined) patch.touchPanGain = terminal.touchPanGain;
+  // Parsed by user-config.ts since #221 but never applied, so the documented
+  // `osc-title-tabs = false` did nothing.
+  if (terminal.oscTitleTabs !== undefined) patch.oscTitleTabs = terminal.oscTitleTabs;
+  if (terminal.oscTitleWorkspaces !== undefined) patch.oscTitleWorkspaces = terminal.oscTitleWorkspaces;
   if (terminal.userColorSchemes) {
     // Merge: file-defined schemes replace by-name but don't clobber others.
     patch.userColorSchemes = {

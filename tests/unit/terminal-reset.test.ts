@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { resetTerminalModes, terminalResetSequence } from '../../src/renderer/utils/terminal-reset';
+import { resetTerminalModes, shellOwnsScreen, terminalResetSequence } from '../../src/renderer/utils/terminal-reset';
+import { Terminal } from '@xterm/xterm';
 import { applyMouseModeSequences, emptyMouseModeState, isMouseTracking } from '../../src/renderer/utils/mouse-modes';
 
 /**
@@ -141,3 +142,57 @@ describe('terminal reset (issue #175)', () => {
     expect(state.encodings.size).toBe(0);
   });
 });
+
+/**
+ * Issue #347: the manual reset left the alternate screen while the program that
+ * entered it was still running. A fullscreen program sends ?1049h once, so its
+ * later frames went into the shell's scrollback and its exit ?1049l printed the
+ * prompt over the stale frame. The manual reset now keeps the alternate screen
+ * unless the shell has reported it is back at its prompt.
+ */
+describe('manual reset under a live fullscreen program (issue #347)', () => {
+  const ESC = '\x1b';
+  const write = (t: Terminal, d: string) => new Promise<void>((r) => t.write(d, r));
+  const row = (t: Terminal, y: number) => t.buffer.active.getLine(t.buffer.active.viewportY + y)?.translateToString(true) ?? '';
+
+  it('only a shell back at its prompt owns the screen', () => {
+    expect(shellOwnsScreen('idle')).toBe(true);
+    expect(shellOwnsScreen('interrupted')).toBe(true);
+    expect(shellOwnsScreen('running')).toBe(false);
+    // No report at all: a program started during shell init (a restored
+    // `claude --resume`) was never announced, and must not lose its screen.
+    expect(shellOwnsScreen(undefined)).toBe(false);
+  });
+
+  it('keepAlternateScreen drops ?1049l and still resets every other mode', () => {
+    const writes: string[] = [];
+    const fake = { buffer: { active: { type: 'alternate' } }, write: (d: string) => writes.push(d) } as any;
+    resetTerminalModes(fake, { keepAlternateScreen: true });
+    expect(writes).toEqual([terminalResetSequence(false)]);
+    expect(writes[0]).toContain(`${ESC}[?1003l`);
+  });
+
+  it('a live program keeps drawing on the alternate screen, and its exit restores the shell', async () => {
+    const t = new Terminal({ cols: 30, rows: 6, allowProposedApi: true });
+    await write(t, 'MAIN-1\r\nMAIN-2\r\nPS> app\r\n');
+    await write(t, `${ESC}[?1049h${ESC}[HALT-BEFORE`);
+    resetTerminalModes(t, { keepAlternateScreen: true });
+    await write(t, '\r\nALT-AFTER');
+    expect(t.buffer.active.type).toBe('alternate');
+
+    await write(t, `${ESC}[?1049lPS> `);
+    expect(t.buffer.active.type).toBe('normal');
+    expect([row(t, 0), row(t, 1), row(t, 2), row(t, 3)]).toEqual(['MAIN-1', 'MAIN-2', 'PS> app', 'PS> ']);
+    t.dispose();
+  });
+
+  it('still leaves the alternate screen a dead program abandoned (#175)', async () => {
+    const t = new Terminal({ cols: 30, rows: 6, allowProposedApi: true });
+    await write(t, `MAIN-1\r\n${ESC}[?1049hDEAD-TUI`);
+    resetTerminalModes(t);
+    await write(t, '');
+    expect(t.buffer.active.type).toBe('normal');
+    t.dispose();
+  });
+});
+
