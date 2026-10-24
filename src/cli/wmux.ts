@@ -475,6 +475,26 @@ export function browserRequest(args: string[], caller?: string): BrowserRequest 
   return caller ? { ...req, params: { ...req.params, caller } } : req;
 }
 
+/** How long `wmux open` waits for the renderer to accept the URL. */
+export const OPEN_URL_TIMEOUT_MS = 10_000;
+
+/**
+ * The single positional argument of `wmux open`: one http(s) URL.
+ *
+ * Validated in the CLI as well as the renderer because a typo should fail with
+ * a usage-shaped message before a request reaches the pipe. `new URL` also
+ * rejects a bare host, so `wmux open example.com` is an error rather than a
+ * silently mangled request.
+ */
+export function openUrlArg(args: string[]): string {
+  const value = args[1] ?? '';
+  const protocol = URL.canParse(value) ? new URL(value).protocol : '';
+  if (args.length > 2 || (protocol !== 'http:' && protocol !== 'https:')) {
+    throw new Error('wmux open: expected one http(s) URL');
+  }
+  return value;
+}
+
 /**
  * What a group command says when its subcommand is missing or unknown.
  *
@@ -2038,6 +2058,11 @@ const COMMAND_SPECS = {
   'focus-window': { usage: 'wmux focus-window <windowId>' },
   'new-window': { usage: 'wmux new-window' },
 
+  // Links
+  open: {
+    usage: 'wmux open <http(s) URL>   (open in the wmux browser panel, per Settings → Browser → Links)',
+  },
+
   // Remote management (issue #78)
   bridge: {
     usage: [
@@ -2346,6 +2371,9 @@ const COMMANDS: Record<CommandName, (args: string[]) => Promise<void> | void> = 
   'focus-window': async (args) => print(await sendV2('window.focus', { id: args[1] })),
   'new-window': async () => print(await sendV2('window.create')),
 
+  // Links
+  open: async (args) => print(await sendV2('link.open', { url: openUrlArg(args) }, OPEN_URL_TIMEOUT_MS)),
+
   // Remote management (issue #78)
   bridge: cmdBridge,
   token: cmdToken,
@@ -2541,6 +2569,7 @@ function printUsage() {
 Usage: wmux <command> [options]
 
 System:     ping, identify, capabilities, list-windows, focus-window <id>, new-window
+Links:      open <url>   (open it in the wmux browser panel, per Settings → Browser → Links)
 Workspace:  new-workspace, close-workspace, select-workspace, rename-workspace, list-workspaces
             current-workspace | whoami [--surface <id>]   (the workspace THIS pane is in)
 Remote:     ssh [ssh options] <user@host> [--title T]   (remote terminal in a new workspace)

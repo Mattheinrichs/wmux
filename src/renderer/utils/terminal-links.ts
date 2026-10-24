@@ -1,5 +1,6 @@
 import type { ILinkHandler } from '@xterm/xterm';
 import { openInWmuxBrowser } from './open-in-browser';
+import { isHttpUrl } from './open-link';
 
 /** xterm's `terminal.modes.mouseTrackingMode` — public API since xterm 5. */
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
@@ -39,14 +40,7 @@ export function linkClickTarget(
 
 /** Route terminal links through wmux instead of xterm's window.open fallback. */
 export function activateTerminalLink(event: MouseEvent, uri: string, mouseTracking: MouseTrackingMode = 'none'): void {
-  let protocol: string;
-  try {
-    protocol = new URL(uri).protocol;
-  } catch {
-    return;
-  }
-
-  if (protocol !== 'http:' && protocol !== 'https:') return;
+  if (!isHttpUrl(uri)) return;
 
   // Report only whether to invert. Whether that means "panel" or "system
   // browser" depends on browserPrefs.openLinksExternally, and that rule lives

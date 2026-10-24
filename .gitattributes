@@ -2,6 +2,9 @@
 # runs under bash even on Windows with core.autocrlf=true.
 src/cli-bin/wmux text eol=lf
 
+# $BROWSER entry point; same reason — bash shebang, must stay LF.
+src/cli-bin/wmux-open-url text eol=lf
+
 # ...and its cmd.exe twin needs the opposite, explicitly. cmd.exe parses a .cmd
 # by byte offset assuming CRLF: fed LF-only it resumes mid-token, so `setlocal`
 # runs as `tlocal` and `REM` as `M`. It half-works — the last line still

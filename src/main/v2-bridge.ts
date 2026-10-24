@@ -94,6 +94,17 @@ export async function resolveCallerTarget<W>(
 
 const S = (v: any) => JSON.stringify(v);
 
+/**
+ * The `link.open` renderer expression.
+ *
+ * Exported so the escaping is testable: the URL reaches `executeJavaScript` as
+ * source, so a quote or newline in it must be encoded, not concatenated raw.
+ * A non-string becomes `""`, which `openLinkFromBridge` refuses.
+ */
+export function linkOpenJs(url: unknown): string {
+  return `window.__wmux_openLink?.(${S(typeof url === 'string' ? url : '')})`;
+}
+
 // Same value as MAX_AGENT_CELLS in renderer/store/split-utils.ts; main's tsconfig does not include the renderer.
 const MAX_LAYOUT_AGENT_CELLS = 16;
 
@@ -137,6 +148,18 @@ function targetForCaller(caller: unknown): Promise<CallerTarget<BrowserWindow> |
 }
 
 const SPECS: Record<string, BridgeSpec> = {
+  /**
+   * A URL an agent or CLI asked wmux to open (`wmux open`).
+   *
+   * Deliberately not `callerScoped`: the window is resolved from the caller,
+   * but `openInWmuxBrowser` uses that window's active workspace, exactly like a
+   * terminal link click. `requireResult` catches an old renderer with no bridge
+   * instead of silently answering ok.
+   */
+  'link.open': {
+    js: (p) => linkOpenJs(p?.url),
+    requireResult: 'Could not open the link',
+  },
   'workspace.create': {
     js: (p) => `window.__wmux_createWorkspace?.(${S(p || {})})`,
     shape: (r) => r || { ok: true },

@@ -16,6 +16,7 @@ import { getNodeRuntime } from './node-runtime';
 import { system32, opensshPath } from './system32';
 import { bashAlias, gitBashCandidates, isWslBashLauncher, isGitBashLauncher, GIT_BASH_LOGIN_ARGS } from './git-bash';
 import { deliverStartupCommandsWhenReady } from './startup-commands';
+import { browserEnvFor, WSL_ENV_PASSTHROUGH } from './pane-browser-env';
 
 // Applied once, at load, before any PTY can exist — the exit callback it guards
 // is registered by node-pty inside pty.spawn(), so a later install would leave
@@ -522,10 +523,7 @@ function buildShellArgs(
     // WMUX_REMOTE / WMUX_REMOTE_TOKEN ride along so a devcontainer launched from
     // this WSL shell inherits them and its CLI can reach wmux over the bridge
     // (issue #19). Harmless when unset — WSLENV skips a variable with no value.
-    const wmuxWslEnv =
-      'WMUX/u:WMUX_SURFACE_ID/u:WMUX_CLI/up:WMUX_PIPE/u:WMUX_PIPE_TOKEN/u:WMUX_INTEGRATION/u'
-      + ':WMUX_REMOTE/u:WMUX_REMOTE_TOKEN/u';
-    env.WSLENV = env.WSLENV ? `${env.WSLENV}:${wmuxWslEnv}` : wmuxWslEnv;
+    env.WSLENV = env.WSLENV ? `${env.WSLENV}:${WSL_ENV_PASSTHROUGH}` : WSL_ENV_PASSTHROUGH;
     // A restored WSL/POSIX cwd (issue #60) can't be a Win32 process cwd (error
     // 267). Open it INSIDE the distro via --cd instead; the Win32-side cwd is
     // sanitized to a valid Windows dir by the caller.
@@ -733,6 +731,11 @@ export class PtyManager {
     const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
     const prefix = shimDirs.join(path.delimiter);
     env[pathKey] = env[pathKey] ? `${prefix}${path.delimiter}${env[pathKey]}` : prefix;
+
+    // Route CLI link-openers through wmux (WSL only). The shell's own rc may
+    // override this; Windows panes keep whatever BROWSER they had, because the
+    // shim is a POSIX script and native tools like `gh` cannot run it.
+    Object.assign(env, browserEnvFor(shellType));
 
     const args = [...buildShellArgs(shellType, env, integrationDir, options.cwd), ...shellExtraArgs];
 
