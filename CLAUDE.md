@@ -257,6 +257,23 @@ Terminal tabs in a pane are ALL rendered simultaneously (hidden with `visibility
 When switching tabs, only CSS changes — the xterm instance stays alive, no PTY reconnection needed.
 The `surfaceId` is passed to `pty.create()` so PTY ID = Surface ID (enables reliable re-attachment).
 
+### Keep-Alive Terminals (issue #346)
+A split-tree change (split, close a sibling, zoom, drag a tab to another pane) remounts the
+panes it moves. It used to rebuild their xterm too, so every piece of emulator state had to
+be replayed by hand (#49 buffer, #164 mouse modes, #216/#256 ConPTY cursor row, #345 alt
+screen) and markers, cursor style and scroll region were simply lost. Now `TerminalHost`
+(mounted once in `App.tsx`) portals ONE `TerminalPane` per terminal surface into an element
+owned by `components/Terminal/terminal-keepalive.ts`, and a pane renders only a
+`KeptAliveTerminal` slot that the element is MOVED into. A slot-less terminal whose surface
+still exists (the other panes of a zoomed workspace) is parked off-screen at its last pixel
+size — a 0×0 fit would resize the PTY to 2 columns — with `visible:false`; it is disposed
+only when its surface leaves the store. Two consequences to remember: React events from
+inside a terminal bubble through the HOST, not the pane, so the leaf's click-to-focus is a
+native listener on the slot (`onActivate`); and a same-commit move changes no prop, so
+`attachGeneration` re-runs the show path (refit, repaint, refocus — removing the element
+blurred its textarea). The snapshot/replay machinery stays as the fallback for a terminal
+that genuinely is rebuilt (StrictMode's dev double-mount).
+
 ### Split Tree
 Pane layouts use an immutable binary tree (`SplitNode`). Each leaf = one pane with N surfaces (tabs).
 Mutations go through `splitNode()`, `removeLeaf()`, `findLeaf()`, `getAllPaneIds()` in `split-utils.ts`.
@@ -306,10 +323,11 @@ Four things about this are easy to get wrong and expensive to rediscover:
   buffer adds no new crossing. Only the agent source sends text, and only because an
   agent TUI repaints over its own input box — nothing that reads the screen afterwards
   can recover it.
-- **Markers do not survive a split-tree restructure.** A remount replays the buffer as
-  serialized TEXT (`snapshotSurfaceBuffer`), which carries no markers. Those prompts stay
-  in the outline with `line: null` and a disabled jump, rather than scrolling the user
-  somewhere arbitrary.
+- **Markers survive a split-tree restructure since #346** — the xterm is no longer rebuilt
+  (see Keep-Alive Terminals). Only a terminal that really IS rebuilt (the snapshot
+  fallback) replays its buffer as serialized TEXT (`snapshotSurfaceBuffer`), which carries
+  no markers; those prompts stay in the outline with `line: null` and a disabled jump,
+  rather than scrolling the user somewhere arbitrary.
 - **The anchor's pending-line count is NOT in the store.** It changes on every PTY chunk;
   a store write there re-renders every subscriber at PTY speed, which is the shape of
   #141. It lives in a module map like `surfaceMouseModes`, and the pill subscribes to a

@@ -6,6 +6,7 @@ import { PaneId, SurfaceId, SurfaceRef, WorkspaceId, WorkspaceInfo, SplitNode } 
 import { cwdReportPatch } from '../shared/paths';
 import { classifyClaudeNotification } from '../shared/claude-notification';
 import SplitContainer from './components/SplitPane/SplitContainer';
+import { TerminalHost } from './components/Terminal/KeptAliveTerminal';
 import { updateRatio, getAllPaneIds, findLeaf, replaceSoleTerminalSurface, freezeSurfaceCwds, dropEphemeralSurfaces, dropCodeContent, workspaceHasTerminalCwd } from './store/split-utils';
 import { forgetProgressTurn } from './utils/progress-turn';
 import { type ShellState, previousSurfaceShellState, recordSurfaceShellState, treeSurfaceIds, workspaceShellState } from './utils/surface-shell-state';
@@ -1758,6 +1759,9 @@ export default function App() {
               )}
             </div>
           ))}
+          {/* Every terminal in the window, mounted once and moved into the
+              pane slot that shows it (#346). Renders no DOM of its own here. */}
+          <TerminalHost />
         </div>
 
         {/* Right: file explorer panel — before the browser so the order is

@@ -104,6 +104,13 @@ html.wmux-transparent .split-divider--horizontal {
   position: absolute;
   inset: 0;
 }
+/* A terminal surface's slot, and the kept-alive element moved into it (#346).
+   Both fill the layer exactly as TerminalPane used to on its own. */
+.kept-terminal-slot,
+.kept-terminal {
+  width: 100%;
+  height: 100%;
+}
 /* Strength from Settings → General → "Dim unfocused panes" (App.tsx sets the
    property); the fallback is the shipped default. */
 .pane-wrapper__unfocused-overlay {

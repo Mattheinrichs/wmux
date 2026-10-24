@@ -8,7 +8,7 @@ import NewOutputPill from './NewOutputPill';
 import '../../styles/terminal.css';
 import '../../styles/prompt-marks.css';
 
-interface TerminalPaneProps {
+export interface TerminalPaneProps {
   surfaceId?: string;
   shell?: string;
   cwd?: string;
@@ -35,6 +35,11 @@ interface TerminalPaneProps {
   showFindBar?: boolean;
   onFindBarClose?: () => void;
   copyModeActive?: boolean;
+  /**
+   * Bumped each time the keep-alive moves this terminal into a new slot (#346),
+   * so it refits, repaints and takes focus back the way it does when shown.
+   */
+  attachGeneration?: number;
 }
 
 export default function TerminalPane({
@@ -55,8 +60,9 @@ export default function TerminalPane({
   showFindBar = false,
   onFindBarClose,
   copyModeActive = false,
+  attachGeneration,
 }: TerminalPaneProps) {
-  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId });
+  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, attachGeneration, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId });
 
   const [_lastQuery, setLastQuery] = useState('');
 

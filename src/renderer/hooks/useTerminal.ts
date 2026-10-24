@@ -71,6 +71,13 @@ interface UseTerminalOptions {
    *  was last focused (often in a now-hidden workspace), making the new
    *  session look "frozen". */
   focused?: boolean;
+  /**
+   * Changes when the terminal's element has been moved into another pane's
+   * slot (#346, components/Terminal/terminal-keepalive.ts). A move inside one
+   * commit leaves `visible`/`focused` unchanged, and removing the element from
+   * the DOM blurred its textarea — so this re-runs the show path below.
+   */
+  attachGeneration?: number;
   /** Per-surface color scheme override — takes priority over terminalPrefs.theme. */
   colorScheme?: string;
   /** Quick-launch profile commands, run once after the PTY is first created (issue #32). */
@@ -806,7 +813,7 @@ export async function fetchTheme(name: string): Promise<ThemeConfig> {
   }
 }
 
-export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = true, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId }: UseTerminalOptions = {}): UseTerminalResult {
+export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = true, attachGeneration, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId }: UseTerminalOptions = {}): UseTerminalResult {
   const t = useT();
   const terminalRef = useRef<HTMLDivElement | null>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -2111,7 +2118,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
       if (raf1 !== null) cancelAnimationFrame(raf1);
       if (raf2 !== null) cancelAnimationFrame(raf2);
     };
-  }, [visible, focused]);
+  }, [visible, focused, attachGeneration]);
 
   return { terminalRef, fit, xtermRef, searchAddonRef };
 }

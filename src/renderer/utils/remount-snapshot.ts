@@ -1,9 +1,12 @@
 /**
  * What a remount carries across of a terminal's buffer (issue #49).
  *
- * A split-tree restructure disposes the xterm instance and builds a new one
- * while the PTY, and the application on the other end of it, keep running.
- * The snapshot taken here is replayed into the replacement terminal.
+ * When an xterm instance is disposed and rebuilt while the PTY, and the
+ * application on the other end of it, keep running, the snapshot taken here is
+ * replayed into the replacement terminal. A split-tree restructure used to be
+ * the everyday cause; since #346 it moves the live terminal instead
+ * (components/Terminal/terminal-keepalive.ts), and this is the fallback for a
+ * terminal that genuinely is rebuilt (React StrictMode's dev double-mount).
  *
  * ## Why the alternate screen is part of it
  *

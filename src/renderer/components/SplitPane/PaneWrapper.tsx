@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { PaneId, SplitNode, SurfaceId, WorkspaceId, QuickLaunchProfile, ShellInfo, engineOf } from '../../../shared/types';
 import { workspaceFallbackCwd } from '../../../shared/paths';
 import { findLeaf, splitNode } from '../../store/split-utils';
-import TerminalPane from '../Terminal/TerminalPane';
+import KeptAliveTerminal from '../Terminal/KeptAliveTerminal';
 import BrowserPane from '../Browser/BrowserPane';
 import MarkdownPane from '../Markdown/MarkdownPane';
 import DiffPane from '../Diff/DiffPane';
@@ -34,6 +34,11 @@ interface PaneWrapperProps {
   onSurfaceDragPreviewTarget: (targetPaneId: PaneId, target: SurfaceDragPreviewTarget) => void;
   onClearSurfaceDragPreview: () => void;
   onSurfaceDragCommit: (options?: SurfaceDragCommitOptions) => void;
+  /**
+   * Focus this pane. The leaf's React onClick never sees a click on a terminal,
+   * which is portalled from TerminalHost (#346), so the terminal slot calls it.
+   */
+  onActivate?: () => void;
 }
 
 export default function PaneWrapper({
@@ -46,6 +51,7 @@ export default function PaneWrapper({
   onSurfaceDragPreviewTarget,
   onClearSurfaceDragPreview,
   onSurfaceDragCommit,
+  onActivate,
 }: PaneWrapperProps) {
   const { surfaces, activeSurfaceIndex, paneId } = leaf;
 
@@ -261,8 +267,11 @@ export default function PaneWrapper({
           }}
         >
           {surface.type === 'terminal' && (
-            <TerminalPane
+            // The terminal itself lives in TerminalHost and survives this pane
+            // remounting (#346); this is only the slot it is shown in.
+            <KeptAliveTerminal
               surfaceId={surface.id}
+              onActivate={onActivate}
               shell={surface.shell || workspace?.shell}
               cwd={surface.cwd || workspaceFallbackCwd(surface.shell || workspace?.shell, workspace)}
               colorScheme={surface.colorScheme}

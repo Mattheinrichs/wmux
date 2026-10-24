@@ -32,9 +32,9 @@ const ATTACH_FRAMES = 5;
  * `buffer.onBufferChange`: an event fired exactly when the active buffer
  * switches, which is the fact being read. No polling, and nothing to tune.
  *
- * A split-tree restructure replaces the xterm, and the replacement comes back
- * on the alternate buffer when the old one was on it (utils/remount-snapshot.ts),
- * so the buffer type survives a remount. `surfaceMouseModes` was considered as
+ * A split-tree restructure no longer replaces the xterm (#346), and a terminal
+ * that is rebuilt comes back on the alternate buffer when the old one was on it
+ * (utils/remount-snapshot.ts), so the buffer type survives either way. `surfaceMouseModes` was considered as
  * the signal before that was true, but it answers a different question — "has
  * the application enabled mouse tracking" — and `less`, and vim with
  * `set mouse=`, enable none, so it would miss exactly the programs this exists
