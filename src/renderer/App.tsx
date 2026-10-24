@@ -1162,6 +1162,7 @@ export default function App() {
           workspaces: state.workspaces.map(ws => ({
             id: ws.id,
             title: ws.title,
+            titleIsDefault: ws.titleIsDefault,
             customColor: ws.customColor,
             pinned: ws.pinned,
             shell: ws.shell,
@@ -1342,6 +1343,7 @@ export default function App() {
       savedAt: Date.now(),
       workspaces: state.workspaces.map(ws => ({
         title: ws.title,
+        titleIsDefault: ws.titleIsDefault,
         customColor: ws.customColor,
         // Pinning is part of the layout the user arranged — the auto-save has
         // always kept it, so a named save must too (issue #145).
