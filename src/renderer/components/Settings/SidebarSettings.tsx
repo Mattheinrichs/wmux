@@ -11,6 +11,16 @@ export default function SidebarSettings() {
       <h3 className="settings-section-title">{t('settings.sidebarPanel.detailsSection', 'Sidebar Details')}</h3>
 
       <div className="settings-row">
+        <label className="settings-label">{t('settings.sidebarPanel.wrapTitles', 'Wrap long workspace titles')}</label>
+        <input
+          type="checkbox"
+          className="settings-toggle"
+          checked={sidebarPrefs.wrapTitles}
+          onChange={(e) => setSidebarPrefs({ wrapTitles: e.target.checked })}
+        />
+      </div>
+
+      <div className="settings-row">
         <label className="settings-label">{t('settings.sidebarPanel.showGitBranch', 'Show git branch')}</label>
         <input
           type="checkbox"

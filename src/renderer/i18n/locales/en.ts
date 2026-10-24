@@ -506,6 +506,7 @@ export const en = {
   'settings.sidebarPanel.showPorts': 'Show ports',
   'settings.sidebarPanel.showNotificationMessage': 'Show notification message',
   'settings.sidebarPanel.hideAllDetails': 'Hide all details',
+  'settings.sidebarPanel.wrapTitles': 'Wrap long workspace titles',
   'settings.sidebarPanel.appearanceSection': 'Appearance',
   'settings.sidebarPanel.mode': 'Sidebar mode',
   'settings.sidebarPanel.mode.classic': 'Classic',

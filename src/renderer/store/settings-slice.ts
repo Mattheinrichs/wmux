@@ -427,6 +427,12 @@ export interface SidebarPrefs {
    * font-size in sidebar.css multiplies by. 100 is the shipped look.
    */
   textScale: number;
+  /**
+   * Let a long workspace title wrap to two lines before it is truncated (#342).
+   * Off by default: one line is the shipped look, and the layout picker spec
+   * keeps it. A new field, so stored prefs pick it up from the defaults.
+   */
+  wrapTitles: boolean;
 }
 
 export const SIDEBAR_TEXT_SCALE_MIN = 90;
@@ -453,6 +459,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   activeTabIndicator: 'leftRail',
   backgroundOpacity: 100,
   textScale: 100,
+  wrapTitles: false,
 };
 
 // ─── Workspace settings ───────────────────────────────────────────────────────

@@ -467,7 +467,10 @@ export default function WorkspaceRow({
           />
         ) : (
           <span
-            className="workspace-row__title"
+            className={`workspace-row__title${sidebarPrefs.wrapTitles ? ' workspace-row__title--wrap' : ''}`}
+            // The full name on hover (#342): a truncated title was otherwise
+            // readable only by opening the rename box.
+            title={workspaceLabel}
             onDoubleClick={(e) => {
               e.stopPropagation();
               startRename();

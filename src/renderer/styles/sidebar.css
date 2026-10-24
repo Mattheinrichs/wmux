@@ -215,6 +215,16 @@
 
 /* Was `color: #ffffff` unconditionally — correct only against an opaque accent
    fill, and invisible on the light theme once the fill went away. */
+/* Settings → Sidebar → "Wrap long workspace titles" (#342): two lines, then the
+   ellipsis — the same clamp as .orch-panel__task. */
+.workspace-row__title--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .workspace-row--active .workspace-row__title {
   color: var(--ui-text-primary);
 }
