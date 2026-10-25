@@ -422,8 +422,8 @@ contextBridge.exposeInMainWorld('wmux', {
       ipcRenderer.invoke(IPC_CHANNELS.CODE_WRITE_FILE, surfaceId, relPath, content, expectedMtimeMs),
   },
   diff: {
-    getFiles: (cwd: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_FILES, cwd),
-    getFileDiff: (cwd: string, file: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_DIFF, cwd, file),
+    getFiles: (cwd: string, baseRef?: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_FILES, cwd, baseRef),
+    getFileDiff: (cwd: string, file: string, baseRef?: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_DIFF, cwd, file, baseRef),
     onUpdate: (callback: (data: { file?: string }) => void) => {
       const handler = (_event: any, data: any) => callback(data);
       ipcRenderer.on(IPC_CHANNELS.DIFF_UPDATE, handler);

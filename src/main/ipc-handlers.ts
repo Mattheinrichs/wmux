@@ -1250,15 +1250,17 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
 
   // Diff viewer handlers
   // Fallback: prefer process.cwd() (often the project dir) over USERPROFILE (never a git repo)
-  ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string) => {
+  ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const files = await getChangedFiles(resolvedCwd);
+    const ref = typeof baseRef === 'string' && baseRef.trim() ? baseRef.trim() : undefined;
+    const files = await getChangedFiles(resolvedCwd, ref);
     return { files };
   });
 
-  ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string) => {
+  ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const diff = await getFileDiff(resolvedCwd, file);
+    const ref = typeof baseRef === 'string' && baseRef.trim() ? baseRef.trim() : undefined;
+    const diff = await getFileDiff(resolvedCwd, file, ref);
     return { diff };
   });
 
