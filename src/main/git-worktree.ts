@@ -329,7 +329,18 @@ export async function createWorktree(i: {
       // ignore prune failure
     }
     const stderr = err.stderr || err.message || '';
-    const code = classifyAddError(stderr);
+    let code = classifyAddError(stderr);
+    if (code === 'branch_exists') {
+      try {
+        const { stdout } = await execGit(root, ['worktree', 'list', '--porcelain']);
+        const needle = `branch refs/heads/${i.branch}`;
+        if (stdout.split('\n').some((line) => line.trim() === needle)) {
+          code = 'branch_in_use';
+        }
+      } catch {
+        // ignore
+      }
+    }
     return {
       ok: false,
       code,
