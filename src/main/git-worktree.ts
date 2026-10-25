@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getLocalAppDataDir } from '../shared/instance';
+import type { WorktreeMetadata } from '../shared/types';
 import { PTY_EXIT_DRAIN_MS } from './quit-sequence';
 
 const execFileAsync = promisify(execFile);
@@ -473,7 +474,7 @@ export async function reconcileOrphans(
   const claimedSet = new Set((claimed || []).map((c) => path.resolve(c).toLowerCase()));
   const results: Array<{ outcome: RemoveOutcome | 'kept' }> = [];
 
-  let repoDirs: string[] = [];
+  let repoDirs: string[];
   try {
     repoDirs = await fs.promises.readdir(root);
   } catch {
@@ -490,7 +491,7 @@ export async function reconcileOrphans(
     }
     if (!repoStat.isDirectory()) continue;
 
-    let subEntries: string[] = [];
+    let subEntries: string[];
     try {
       subEntries = await fs.promises.readdir(repoDirPath);
     } catch {
@@ -538,7 +539,7 @@ export async function reconcileOrphans(
         continue;
       }
 
-      let hasGitFile = false;
+      let hasGitFile: boolean;
       try {
         const gitStat = await fs.promises.stat(path.join(p, '.git'));
         hasGitFile = gitStat.isFile();
@@ -546,7 +547,7 @@ export async function reconcileOrphans(
         hasGitFile = false;
       }
 
-      let isEmpty = false;
+      let isEmpty: boolean;
       try {
         const entries = await fs.promises.readdir(p);
         isEmpty = entries.length === 0;
@@ -601,4 +602,95 @@ export async function reconcileOrphans(
   }
 
   return results;
+}
+
+function findSplitLeaves(node: any): any[] {
+  if (!node || typeof node !== 'object') return [];
+  if (node.type === 'leaf') return [node];
+  if (Array.isArray(node.children)) {
+    return node.children.flatMap(findSplitLeaves);
+  }
+  return [];
+}
+
+/**
+ * Finds the surfaceId of the active surface or first terminal surface in a splitTree.
+ */
+export function findNoticeSurfaceId(tree: any): string | undefined {
+  const leaves = findSplitLeaves(tree);
+  if (leaves.length === 0) return undefined;
+
+  // 1. Try to find an active terminal surface in the first leaf that has surfaces
+  for (const leaf of leaves) {
+    if (!Array.isArray(leaf.surfaces) || leaf.surfaces.length === 0) continue;
+    const activeIdx = typeof leaf.activeSurfaceIndex === 'number' ? leaf.activeSurfaceIndex : 0;
+    const active = leaf.surfaces[activeIdx] ?? leaf.surfaces[0];
+    if (active && (active.type === 'terminal' || !active.type) && typeof active.id === 'string') {
+      return active.id;
+    }
+  }
+
+  // 2. Try to find the first terminal surface anywhere in the tree
+  for (const leaf of leaves) {
+    if (!Array.isArray(leaf.surfaces)) continue;
+    for (const surface of leaf.surfaces) {
+      if (surface && (surface.type === 'terminal' || !surface.type) && typeof surface.id === 'string') {
+        return surface.id;
+      }
+    }
+  }
+
+  // 3. Fall back to the active surface (or first surface) of the first leaf that has surfaces
+  for (const leaf of leaves) {
+    if (!Array.isArray(leaf.surfaces) || leaf.surfaces.length === 0) continue;
+    const activeIdx = typeof leaf.activeSurfaceIndex === 'number' ? leaf.activeSurfaceIndex : 0;
+    const active = leaf.surfaces[activeIdx] ?? leaf.surfaces[0];
+    if (active && typeof active.id === 'string') {
+      return active.id;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Verifies claimed worktree directories on restore (T12).
+ * If a directory no longer exists on disk:
+ * - Clears the workspace's worktree field so it does not keep claiming a phantom worktree.
+ * - Delivers a pane notice to inform the user that it fell back to the home directory.
+ * - Logs counts only, never paths (#174).
+ */
+export function verifyRestoredWorktrees(
+  windows: Array<{ workspaces?: Array<{ worktree?: WorktreeMetadata; splitTree?: any; [key: string]: any }> }>,
+  deps?: {
+    existsSync?: (p: string) => boolean;
+    showNotice?: (surfaceId: string, text: string) => void;
+  },
+): { verified: number; cleared: number } {
+  const exists = deps?.existsSync ?? fs.existsSync;
+  let verified = 0;
+  let cleared = 0;
+
+  for (const win of windows || []) {
+    for (const ws of win.workspaces || []) {
+      if (ws.worktree?.worktreePath) {
+        if (!exists(ws.worktree.worktreePath)) {
+          delete ws.worktree;
+          cleared++;
+          const surfaceId = findNoticeSurfaceId(ws.splitTree);
+          if (surfaceId && deps?.showNotice) {
+            deps.showNotice(surfaceId, 'Worktree directory was deleted; fell back to home directory');
+          }
+        } else {
+          verified++;
+        }
+      }
+    }
+  }
+
+  if (cleared > 0) {
+    console.log(`[worktree-verify] cleared ${cleared} missing worktree(s), verified ${verified}`);
+  }
+
+  return { verified, cleared };
 }

@@ -24,7 +24,7 @@ import {
   teardownAgentBrowser,
   withDeadline,
 } from './agent-browser-runtime';
-import { reconcileOrphans } from './git-worktree';
+import { reconcileOrphans, verifyRestoredWorktrees } from './git-worktree';
 import { handleBridgeV2 } from './v2-bridge';
 import { distributeAgents, PaneLoadInfo } from './agent-manager';
 import {
@@ -1398,6 +1398,39 @@ function pruneRestoredQwenSessions(windows: SavedWindow[]): void {
 }
 
 /**
+ * Delivers a notice to a surface's pane across all windows.
+ * Attaches a did-finish-load listener if a window is still loading so startup notices are not lost.
+ */
+function deliverPaneNotice(surfaceId: string, text: string): void {
+  const script = `window.__wmux_paneNotice?.(${JSON.stringify(surfaceId)}, ${JSON.stringify(text)}) === true`;
+  const deliverToWindow = (win: BrowserWindow) => {
+    if (win.isDestroyed()) return;
+    if (win.webContents.isLoading()) {
+      win.webContents.once('did-finish-load', () => {
+        if (!win.isDestroyed()) {
+          void win.webContents.executeJavaScript(script).catch(() => {});
+        }
+      });
+    } else {
+      void win.webContents.executeJavaScript(script).catch(() => {});
+    }
+  };
+
+  const windows = BrowserWindow.getAllWindows();
+  if (windows.length === 0) {
+    setImmediate(() => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        deliverToWindow(win);
+      }
+    });
+  } else {
+    for (const win of windows) {
+      deliverToWindow(win);
+    }
+  }
+}
+
+/**
  * Record what killed main, when JS is what killed it (issue #214).
  *
  * `main.log` records lifecycle only, which is exactly right for the abort #150
@@ -1588,6 +1621,7 @@ app.whenReady().then(() => {
   pruneRestoredClaudeSessions(savedWindows);
   pruneRestoredQwenSessions(savedWindows);
   pruneRestoredOmpSessions(savedWindows);
+  verifyRestoredWorktrees(savedWindows, { showNotice: deliverPaneNotice });
   if (savedWindows.length === 0) {
     sessionWindows.markStartup(windowManager.createWindow());
   } else {
