@@ -503,4 +503,12 @@ contextBridge.exposeInMainWorld('wmux', {
     isFrameless: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_FRAMELESS),
     relaunch: () => ipcRenderer.send(IPC_CHANNELS.WINDOW_RELAUNCH),
   },
+  worktree: {
+    create: (repoDir: string, branch: string, base?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_CREATE, repoDir, branch, base),
+    remove: (worktreePath: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_REMOVE, worktreePath),
+    probe: (dir: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_PROBE, dir),
+  },
 });
