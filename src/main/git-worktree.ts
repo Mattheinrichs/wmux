@@ -458,6 +458,30 @@ export async function removeWorktree(
 }
 
 /**
+ * Deletes a branch by name after explicit discard confirmation (#7).
+ * Never deletes branches automatically (D10).
+ * Never logs paths (#174).
+ */
+export async function deleteBranch(
+  repoRoot: string,
+  branch: string,
+  deps?: {
+    execFileAsync?: (file: string, args: string[], options: any) => Promise<any>;
+  }
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isValidBranchName(branch)) {
+    return { ok: false, error: 'invalid branch name' };
+  }
+  const run = deps?.execFileAsync ?? execFileAsync;
+  try {
+    await run('git', ['branch', '-D', branch], { cwd: repoRoot, windowsHide: true });
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'git branch -D failed' };
+  }
+}
+
+/**
  * Scans the worktree root for unmanaged directories and reconciles them (D4).
  * Walks <root>/<repo>/<branch> two levels deep, skips anything in claimed.
  * Gathers three facts, calls classifyWorktreeDir:

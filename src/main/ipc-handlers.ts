@@ -48,7 +48,7 @@ import { getRemoteConsole } from './remote-console';
 import type { RemoteConsoleRuntime } from './remote-console/contract';
 import type { RemoteModesResult, RemoteSnapshotResult } from '../shared/remote-console-config';
 import { getChangedFiles, getFileDiff, getChangedFilesWithBaseline } from './diff-provider';
-import { createWorktree, removeWorktree, probeRepo } from './git-worktree';
+import { createWorktree, removeWorktree, probeRepo, deleteBranch } from './git-worktree';
 import {
   readMarkdownFile,
   isAllowedMarkdownPath,
@@ -1578,6 +1578,16 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
       } catch {
         return null;
       }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORKTREE_DELETE_BRANCH,
+    async (_event, repoRoot: unknown, branch: unknown) => {
+      if (typeof repoRoot !== 'string' || typeof branch !== 'string') {
+        return { ok: false, error: 'invalid arguments' };
+      }
+      return deleteBranch(repoRoot, branch);
     },
   );
 

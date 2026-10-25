@@ -900,6 +900,7 @@ export const IPC_CHANNELS = {
   GIT_WORKTREE_CREATE: 'git-worktree:create',
   GIT_WORKTREE_REMOVE: 'git-worktree:remove',
   GIT_WORKTREE_PROBE: 'git-worktree:probe',
+  WORKTREE_DELETE_BRANCH: 'worktree:delete-branch',
 } as const;
 
 /**
@@ -988,4 +989,21 @@ export interface OrchestrationState {
 export function engineOf(surface: { type: SurfaceType; browserEngine?: BrowserEngine }): BrowserEngine {
   if (surface.type !== 'browser') return 'web';
   return surface.browserEngine === 'agent' ? 'agent' : 'web';
+}
+
+
+/**
+ * Preload bridge interface for window.wmux.worktree (#7).
+ */
+export interface WorktreeBridge {
+  create: (repoDir: string, branch: string, base?: string) => Promise<any>;
+  remove: (worktreePath: string) => Promise<any>;
+  probe: (dir: string) => Promise<any>;
+  deleteBranch: (repoRoot: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
+declare global {
+  interface Window {
+    wmux: any;
+  }
 }

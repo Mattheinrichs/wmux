@@ -510,5 +510,7 @@ contextBridge.exposeInMainWorld('wmux', {
       ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_REMOVE, worktreePath),
     probe: (dir: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_PROBE, dir),
+    deleteBranch: (repoRoot: string, branch: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_DELETE_BRANCH, repoRoot, branch),
   },
 });
