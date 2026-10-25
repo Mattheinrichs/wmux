@@ -165,6 +165,19 @@ function run(cwd: string, ...args: string[]): string {
   return execFileSync(GIT, ['-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd, env: ENV, encoding: 'utf8' });
 }
 
+/** The 8.3 spelling of an existing path, as cmd.exe reports it. */
+function shortPath(p: string): string | null {
+  try {
+    const cmd = path.join(process.env.SystemRoot ?? String.raw`C:\Windows`, 'System32', 'cmd.exe');
+    // Verbatim: Node's per-argument quoting would wrap the loop in quotes cmd
+    // then reads as part of the path.
+    const line = `"for %A in ("${p}") do @echo %~sA"`;
+    return execFileSync(cmd, ['/d', '/s', '/c', line], { encoding: 'utf8', windowsVerbatimArguments: true }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function ok<T>(req: Parameters<typeof handleGitView>[0]): Promise<T> {
   const res = await handleGitView(req) as GitViewResult<T>;
   if (!res.ok) throw new Error(res.error);
@@ -178,7 +191,9 @@ describe('git-view: a repository with a linked worktree', () => {
 
   beforeAll(() => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wmux-gitview-')));
-    repo = path.join(tmp, 'repo');
+    // A long name with a space, so Windows gives it a different 8.3 short
+    // name — the spelling the GitHub runner's own temp dir arrives in.
+    repo = path.join(tmp, 'repository with a long name');
     fs.mkdirSync(repo);
     run(repo, 'init', '-q', '-b', 'main');
     fs.writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\nthree\n');
@@ -266,6 +281,14 @@ describe('git-view: a repository with a linked worktree', () => {
     const option = await handleGitView({ op: 'branch', cwd: repo, worktree: repo, base: '--output=pwned' });
     expect(option).toMatchObject({ ok: false, code: 'invalid' });
     expect(fs.existsSync(path.join(repo, 'pwned'))).toBe(false);
+  });
+
+  it('recognises a worktree named by its 8.3 short path (CI runners, long profile names)', async () => {
+    if (process.platform !== 'win32') return;
+    const short = shortPath(repo);
+    if (!short || short.toLowerCase() === repo.toLowerCase()) return; // 8.3 names disabled on this volume
+    const changes = await ok<GitWorkingChanges>({ op: 'working', cwd: short, worktree: short });
+    expect(changes.untracked.map((f) => f.path)).toContain('.worktrees/');
   });
 
   it('answers not_repo outside a repository, never throws', async () => {

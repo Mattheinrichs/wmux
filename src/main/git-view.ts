@@ -68,9 +68,20 @@ export function isSafeRepoPath(file: unknown): file is string {
     && !path.isAbsolute(file);
 }
 
-/** One spelling per directory, for comparison only. */
+/**
+ * One spelling per directory, for comparison only.
+ *
+ * Through `realpathSync.native` first: git prints a worktree's LONG path,
+ * while a path that reached us any other way can be an 8.3 short name
+ * (`C:\Users\RUNNER~1\…` — the GitHub runner's temp dir, and any user whose
+ * profile name is long or has a space) or go through a junction. The JS
+ * `realpathSync` expands neither; the native one asks Windows for the final
+ * path. A path that cannot be resolved (gone, no access) keeps its spelling.
+ */
 export function worktreeKey(p: string): string {
-  let key = path.resolve(p).replace(/\//g, '\\');
+  let resolved = path.resolve(p);
+  try { resolved = fs.realpathSync.native(resolved); } catch { /* keep the spelling we were given */ }
+  let key = resolved.replace(/\//g, '\\');
   if (process.platform === 'win32') key = key.toLowerCase();
   while (key.length > 3 && key.endsWith('\\')) key = key.slice(0, -1);
   return key;
