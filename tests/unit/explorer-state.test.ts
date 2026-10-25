@@ -405,7 +405,7 @@ describe('nextRefillPaths', () => {
 // where it reaches App.tsx's `onAction`. That handler dispatches on the action
 // name and hands anything it does not recognise to a console.log, so an entry
 // with no case is selectable and does nothing. Exactly the failure the
-// prompt-log actions are called out for in CLAUDE.md; this pins ours beside
+// prompt-log actions are called out for in AGENTS.md; this pins ours beside
 // them. There is deliberately only ONE explorer entry: routing it through the
 // shared handler is what lets the palette show its Ctrl+Shift+X binding.
 describe('command palette wiring', () => {
