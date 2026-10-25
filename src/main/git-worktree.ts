@@ -88,11 +88,11 @@ export type AddErrorCode =
 export function classifyAddError(stderr: string): AddErrorCode {
   if (!stderr) return 'git_failed';
   const lower = stderr.toLowerCase();
-  if (lower.includes('already exists') || lower.includes('a branch named')) {
-    return 'branch_exists';
-  }
   if (lower.includes('is already used by worktree at')) {
     return 'branch_in_use';
+  }
+  if (lower.includes('a branch named') || lower.includes('already exists')) {
+    return 'branch_exists';
   }
   return 'git_failed';
 }
