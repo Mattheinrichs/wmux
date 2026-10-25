@@ -663,56 +663,7 @@ Every channel is defined in `IPC_CHANNELS` in `src/shared/types.ts`; read the li
 
 ## Shell Integration
 
-Scripts in `src/shell-integration/` (deployed to `resources/shell-integration/`):
-
-| Script | Reports |
-|--------|---------|
-| `wmux-powershell-integration.ps1` | cwd, git branch/dirty, shell state, PR polling (45s), OSC 133 A/B/C/D |
-| `wmux-bash-integration.sh` | cwd, git branch/dirty, shell state, ports, OSC 133 A/B/C/D (bash + zsh) |
-| `wmux-cmd-integration.cmd` | Basic OSC 9 escape sequences, OSC 133 A/B (no C/D — cmd has no preexec seam, so they are not representable and are deliberately not faked) |
-
-`resources/shell-integration/` is a checked-in **byte-identical mirror**, enforced by
-`tests/unit/resources-sync.test.ts` (#168/#169) — editing a script without copying it
-there fails `npm test` AND ships the old file.
-
-**OSC 133 (#207)** carries the prompt boundaries the prompt log needs in-band, which a
-pipe message arriving milliseconds later cannot: the consumer is the xterm parser, and it
-needs the boundary at an exact byte offset in the stream. Two traps, both load-bearing:
-
-- **bash needs a DOUBLED backslash for the ST terminator inside `\[ \]`.** bash decodes
-  the contents of the ignore region, so ST's trailing `\` pairs with the `\` of the
-  closing `\]`: the end marker is destroyed, a stray `]` leaks into the visible prompt,
-  readline mis-measures the prompt width and long command lines wrap wrong. Verify with
-  `printf '%s' "${PS1@P}" | od -c`, never by reading. zsh's `%{ %}` expansion is
-  `%`-based and passes backslashes through, so there the plain form is the correct one.
-- **PowerShell: `$?` decides, `$LASTEXITCODE` only refines.** They answer different
-  questions — `$LASTEXITCODE` is the last *native* process's code, says nothing about a
-  failed cmdlet, and is sticky. Using it alone reports every failed cmdlet as a success.
-  Both must be captured as the first two statements of `prompt`; almost anything clobbers
-  them, which is how the `interrupted` shell state sat dead for years (`Report-GitBranch`
-  ran `git` before the check read `$LASTEXITCODE`).
-
-`B`/`C` come from `PSConsoleHostReadLine`, not the PSReadLine Enter handler: that handler
-runs *before* `AcceptLine` echoes the newline, so a `C` there lands on the input row and
-every consumer is one row out. It also keeps the marks out of the prompt string, so
-PSReadLine never has to width-count escapes — the PowerShell analogue of the `\[ \]`
-problem, sidestepped rather than solved.
-
-**The git report is one spawn, off the prompt thread.** `prompt` used to cost 55 ms per
-Enter, 50 ms of it two git processes (`rev-parse --abbrev-ref HEAD`, then
-`status --porcelain`). It is now a single `git --no-optional-locks status --porcelain=v2
---branch` — branch AND dirtiness in one process, `--no-optional-locks` so a status running
-behind the user's back never leaves `.git/index.lock` in front of their `git commit` —
-resolved once at init to `mingw64\bin\git.exe` rather than the `cmd\git.exe` launcher
-(8 ms per spawn), and run in an in-process **runspace** (never `Start-Job`, which is a whole
-pwsh.exe): `prompt` measures 1.4 ms, the report lands ~30 ms later. Wire text is
-byte-identical to the old two-spawn form for every case in
-`tests/unit/git-branch-report.test.ts` — including an unborn repo, which v2 reports as
-`branch.oid (initial)` with exit 0 and which must still CLEAR, because `rev-parse` exited
-128 there. The worker drains a `pending` cwd under a lock, so two Enters 47 ms apart both
-report and `BeginInvoke` is never called on a pipeline still running; the cwd it is handed
-is `CurrentFileSystemLocation.ProviderPath`, not `$PWD` (empty under `cd Env:`). bash mirrors
-the single-spawn shape; the `\[ \]` prompt string is untouched.
+The scripts live in `src/shell-integration/`. `resources/shell-integration/` is a byte-identical mirror that `tests/unit/resources-sync.test.ts` enforces, so every edit is made in both. Before changing either, load the `wmux-shell-integration` skill (`.agents/skills/wmux-shell-integration/SKILL.md`). It covers what each script reports, the OSC 133 traps and the off-thread git report.
 
 Env vars set by wmux in spawned shells: `WMUX=1`, `WMUX_SURFACE_ID`, `WMUX_PIPE`, `WMUX_CLI`,
 `WMUX_NODE` (+ `WMUX_NODE_ELECTRON` when it is wmux's own binary — issue #187).
@@ -740,6 +691,12 @@ npm test                    # Run all unit tests
 npm run test:watch          # Watch mode
 npx vitest run tests/unit/pty-manager.test.ts  # Single file
 ```
+
+---
+
+## Agent Skills
+
+Task procedures live in repo skills, loaded only when a task matches. `.agents/skills/<name>/SKILL.md` is the source of truth, and Codex reads it there. `.claude/skills/` is a generated copy for Claude Code: edit `.agents/skills/`, then run `npm run sync:skills`. `npm test` fails while the two differ, and when a `SKILL.md` uses frontmatter outside the Agent Skills spec (`name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools`), since the same file has to load in both agents.
 
 ---
 

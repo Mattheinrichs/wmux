@@ -13,3 +13,6 @@ src/cli-bin/wmux-open-url text eol=lf
 src/cli-bin/wmux.cmd text eol=crlf
 resources/shell-integration/wmux-cmd-integration.cmd text eol=crlf
 src/shell-integration/wmux-cmd-integration.cmd text eol=crlf
+
+# Generated from .agents/skills/ by `npm run sync:skills` (#368); GitHub collapses it in diffs.
+.claude/skills/** linguist-generated=true
