@@ -48,6 +48,7 @@ import { getRemoteConsole } from './remote-console';
 import type { RemoteConsoleRuntime } from './remote-console/contract';
 import type { RemoteModesResult, RemoteSnapshotResult } from '../shared/remote-console-config';
 import { getChangedFiles, getFileDiff, getChangedFilesWithBaseline } from './diff-provider';
+import { createWorktree, removeWorktree, probeRepo } from './git-worktree';
 import {
   readMarkdownFile,
   isAllowedMarkdownPath,
@@ -1525,6 +1526,58 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
         return { error: 'Failed to open file', code: 'read_failed' };
       }
       return { ok: true };
+    },
+  );
+
+  // Git worktree workspaces (#7)
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_CREATE,
+    async (_event, repoDir: unknown, branch: unknown, base: unknown) => {
+      if (
+        typeof repoDir !== 'string' ||
+        typeof branch !== 'string' ||
+        (base !== undefined && typeof base !== 'string')
+      ) {
+        return { ok: false, error: 'invalid_argument', message: 'Invalid argument types' };
+      }
+      try {
+        return await createWorktree({ repoRoot: repoDir, branch, base });
+      } catch (err: any) {
+        return { ok: false, error: 'spawn_failed', message: (err as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_REMOVE,
+    async (_event, worktreePath: unknown) => {
+      if (typeof worktreePath !== 'string') {
+        console.warn('[worktree] remove failed: invalid_argument');
+        return 'refused_not_wmux';
+      }
+      try {
+        const outcome = await removeWorktree(worktreePath);
+        if (outcome !== 'removed') {
+          console.warn(`[worktree] remove failed: ${outcome}`);
+        }
+        return outcome;
+      } catch {
+        return 'left_behind';
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_PROBE,
+    async (_event, dir: unknown) => {
+      if (typeof dir !== 'string') {
+        return null;
+      }
+      try {
+        return await probeRepo(dir);
+      } catch {
+        return null;
+      }
     },
   );
 

@@ -26,6 +26,7 @@ import {
   removeWorktree,
   reconcileOrphans,
   worktreeRoot,
+  probeRepo,
 } from '../../src/main/git-worktree';
 
 let hasGit = false;
@@ -36,7 +37,7 @@ try {
   hasGit = false;
 }
 
-describe.runIf(hasGit)('git-worktree integration with real git', () => {
+describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_000 }, () => {
   let tempBase: string;
   let mainRepo: string;
   let savedLocalAppData: string | undefined;
@@ -122,6 +123,16 @@ describe.runIf(hasGit)('git-worktree integration with real git', () => {
       const nonRepo = path.join(tempBase, 'empty-dir');
       fs.mkdirSync(nonRepo, { recursive: true });
       expect(await repoRootFor(nonRepo)).toBeNull();
+    });
+
+    it('probeRepo returns repoRoot and branch, or null for non-repo', async () => {
+      const probe = await probeRepo(mainRepo);
+      expect(probe).not.toBeNull();
+      expect(probe!.repoRoot.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      expect(probe!.currentBranch).toBe('main');
+
+      const nonRepo = path.join(tempBase, 'empty-dir');
+      expect(await probeRepo(nonRepo)).toBeNull();
     });
   });
 

@@ -191,6 +191,18 @@ export async function repoRootFor(dir: string): Promise<string | null> {
   }
 }
 
+export async function probeRepo(dir: string): Promise<{ repoRoot: string; currentBranch: string } | null> {
+  const root = await repoRootFor(dir);
+  if (!root) return null;
+  try {
+    const { stdout } = await execGit(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const currentBranch = stdout.trim();
+    return { repoRoot: root, currentBranch: currentBranch || 'HEAD' };
+  } catch {
+    return { repoRoot: root, currentBranch: 'HEAD' };
+  }
+}
+
 /**
  * Resolves a base commit ref to its name and SHA.
  * F5: Uses `git rev-parse --verify --quiet <ref>^{commit}` and returns `{name, sha}`.
