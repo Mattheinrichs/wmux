@@ -699,6 +699,11 @@ export const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   SETTINGS_CHANGED: 'settings:changed',
+  // Keep Awake
+  AWAKE_GET_STATE: 'awake:getState',
+  AWAKE_SET_MODE: 'awake:setMode',
+  AWAKE_SET_PREVENT_DISPLAY_SLEEP: 'awake:setPreventDisplaySleep',
+  AWAKE_STATE_CHANGED: 'awake:stateChanged',
   // Window
   WINDOW_CREATE: 'window:create',
   WINDOW_CLOSE: 'window:close',
@@ -970,4 +975,14 @@ export interface OrchestrationState {
 export function engineOf(surface: { type: SurfaceType; browserEngine?: BrowserEngine }): BrowserEngine {
   if (surface.type !== 'browser') return 'web';
   return surface.browserEngine === 'agent' ? 'agent' : 'web';
+}
+
+
+export type KeepAwakeMode = 'smart' | 'always' | 'off';
+
+export interface KeepAwakeState {
+  mode: KeepAwakeMode;
+  isActive: boolean;
+  preventDisplaySleep: boolean;
+  blockerType: 'prevent-app-suspension' | 'prevent-display-sleep';
 }
