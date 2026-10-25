@@ -100,6 +100,12 @@ export interface WorkspaceSlice {
    * change what gets saved. Runtime-only, like the close queue above.
    */
   pendingLayoutSave: { workspaceId: WorkspaceId; suggestedName: string } | null;
+  /**
+   * Workspace pending close-confirmation for a Git Worktree (#7).
+   * Prompt options: Keep branch (default), Discard (delete branch), Cancel.
+   */
+  pendingCloseWorktree: WorkspaceInfo | null;
+  cancelCloseWorktree(): void;
 
   createWorkspace(options?: Partial<WorkspaceInfo>, t?: T): WorkspaceId;
   /**
@@ -159,6 +165,11 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
   activeWorkspaceId: null,
   pendingCloseWorkspaceIds: [],
   pendingLayoutSave: null,
+  pendingCloseWorktree: null,
+
+  cancelCloseWorktree(): void {
+    set({ pendingCloseWorktree: null });
+  },
 
   createWorkspace(options = {}, t = identityT): WorkspaceId {
     const id: WorkspaceId = `ws-${uuid()}`;
@@ -253,11 +264,20 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
         }
       }
 
-      return { workspaces: next, activeWorkspaceId: nextActiveId };
+      return {
+        workspaces: next,
+        activeWorkspaceId: nextActiveId,
+        pendingCloseWorktree: state.pendingCloseWorktree?.id === id ? null : state.pendingCloseWorktree,
+      };
     });
   },
 
   requestCloseWorkspace(id: WorkspaceId): void {
+    const ws = get().workspaces.find((w) => w.id === id);
+    if (ws?.worktree) {
+      set({ pendingCloseWorktree: ws });
+      return;
+    }
     // The pref lives in the settings slice; the composed store carries both
     // slices at runtime, but this creator is only typed for its own slice.
     const prefs = (get() as unknown as { workspacePrefs?: { confirmWorkspaceClose?: boolean } })
