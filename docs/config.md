@@ -65,6 +65,13 @@ ui-theme = "dark"        # dark | light | system — the app chrome, not the ter
 # setting has no effect.
 inactive-pane-dim = 20
 
+[sidebar]
+# Let a long workspace title wrap to two lines before it is truncated
+# (Settings -> Sidebar -> "Wrap long workspace titles"). Default false.
+# While this key is set it overrides the Settings toggle at every startup
+# and reload (see "Precedence" below).
+wrap-titles = true
+
 [workspace]
 # What a NEW workspace opens with — the sidebar "+", Ctrl+N, first launch and
 # `wmux new-workspace` all use this.
