@@ -206,3 +206,19 @@
     animation: none;
   }
 }
+
+/* Keep Awake coffee button */
+.titlebar__btn--awake-active {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.titlebar__btn--awake-active:hover {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.titlebar__btn--awake-off {
+  opacity: 0.35;
+}

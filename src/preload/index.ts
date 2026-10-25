@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import * as os from 'os';
-import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult } from '../shared/types';
+import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult, type KeepAwakeMode, type KeepAwakeState } from '../shared/types';
 import type { BrowserHistory } from '../shared/browser-history';
 import type {
   RemoteConsoleBridge,
@@ -315,6 +315,17 @@ contextBridge.exposeInMainWorld('wmux', {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ANSWER, surfaceId, choiceId),
     // Read-only seed for onUpdate, which is delta-only (see App.tsx).
     list: (): Promise<any[]> => ipcRenderer.invoke(IPC_CHANNELS.AGENT_STATE_LIST),
+  },
+  awake: {
+    getState: (): Promise<KeepAwakeState> => ipcRenderer.invoke(IPC_CHANNELS.AWAKE_GET_STATE),
+    setMode: (mode: KeepAwakeMode): Promise<KeepAwakeState> => ipcRenderer.invoke(IPC_CHANNELS.AWAKE_SET_MODE, mode),
+    setPreventDisplaySleep: (prevent: boolean): Promise<KeepAwakeState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AWAKE_SET_PREVENT_DISPLAY_SLEEP, prevent),
+    onStateChange: (callback: (state: KeepAwakeState) => void) => {
+      const handler = (_event: any, state: KeepAwakeState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.AWAKE_STATE_CHANGED, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AWAKE_STATE_CHANGED, handler);
+    },
   },
   // Which agent each surface runs. Carries the derived KIND only; the command
   // line it came from never leaves the main process (see index.ts).

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 // Imported straight from resources/ rather than a copy under src/renderer/assets/
 // (issue #137). The copy was the whole bug: the brand moved to the split-pane
 // icon in 0.37.0 and every shipped asset followed except this one, so the app
@@ -9,9 +9,9 @@ import React from 'react';
 import logoSrc from '../../../../resources/icons/icon.svg';
 import NotificationBell from './NotificationBell';
 import UpdateBadge from './UpdateBadge';
-import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder } from './icons';
+import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder, IconCoffee } from './icons';
 import WindowControls, { useIsFramelessWindow } from './WindowControls';
-import { NotificationInfo, WorkspaceId, PaneId, SurfaceId } from '../../../shared/types';
+import { NotificationInfo, WorkspaceId, PaneId, SurfaceId, KeepAwakeState, KeepAwakeMode } from '../../../shared/types';
 import { useT } from '../../i18n';
 import { useStore } from '../../store';
 import { formatBinding } from '../Settings/KeyboardSettings';
@@ -66,6 +66,37 @@ export default function Titlebar({
   // Clear-transparency windows are frameless and have no native caption
   // buttons, so this is where they come from.
   const frameless = useIsFramelessWindow();
+
+  const [awakeState, setAwakeState] = useState<KeepAwakeState>({
+    mode: 'smart',
+    isActive: false,
+    preventDisplaySleep: false,
+    blockerType: 'prevent-app-suspension',
+  });
+
+  useEffect(() => {
+    let unmounted = false;
+    window.wmux?.awake?.getState?.().then((st) => {
+      if (!unmounted && st) setAwakeState(st);
+    }).catch(() => {});
+
+    const unsubscribe = window.wmux?.awake?.onStateChange?.((st) => {
+      if (!unmounted && st) setAwakeState(st);
+    });
+
+    return () => {
+      unmounted = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  const cycleAwakeMode = useCallback(() => {
+    const nextMode: KeepAwakeMode =
+      awakeState.mode === 'smart' ? 'always' : awakeState.mode === 'always' ? 'off' : 'smart';
+    window.wmux?.awake?.setMode?.(nextMode).then((st) => {
+      if (st) setAwakeState(st);
+    }).catch(() => {});
+  }, [awakeState.mode]);
   return (
     <div className="titlebar">
       <div className="titlebar__left">
@@ -116,6 +147,21 @@ export default function Titlebar({
           aria-pressed={!!focusMode}
         >
           <IconFocus />
+        </button>
+        <button
+          className={`titlebar__btn${awakeState.isActive ? ' titlebar__btn--awake-active' : ''}${awakeState.mode === 'off' ? ' titlebar__btn--awake-off' : ''}`}
+          onClick={cycleAwakeMode}
+          title={
+            awakeState.mode === 'smart'
+              ? `Keep Awake: Smart (${awakeState.isActive ? 'Active — agents working' : 'Armed — waiting for agents'})`
+              : awakeState.mode === 'always'
+              ? 'Keep Awake: Always On'
+              : 'Keep Awake: Off'
+          }
+          aria-label="Keep computer awake toggle"
+          aria-pressed={awakeState.isActive}
+        >
+          <IconCoffee active={awakeState.isActive} />
         </button>
         {onToggleExplorer && (
           <button
