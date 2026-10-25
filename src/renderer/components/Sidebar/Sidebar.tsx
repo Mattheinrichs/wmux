@@ -5,6 +5,7 @@ import SidebarResizeHandle from './SidebarResizeHandle';
 import WorkspaceContextMenu from './WorkspaceContextMenu';
 import SessionMenu from './SessionMenu';
 import NewWorkspaceButton from './NewWorkspaceButton';
+import NewWorktreeModal from './NewWorktreeModal';
 import OrchestrationPanel from './OrchestrationPanel';
 import AgentRosterBanner from './AgentRosterBanner';
 import type { AgentRosterEntry } from '../../store/agent-rollup';
@@ -80,6 +81,8 @@ export default function Sidebar({
   const [dropTarget, setDropTarget] = useState<{ id: WorkspaceId; edge: DropEdge } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [sessionMenuMode, setSessionMenuMode] = useState<'load' | 'save' | null>(null);
+  const [showWorktreeModal, setShowWorktreeModal] = useState(false);
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
   // ── Orchestration IPC subscription ──────────────────────────────────────
   // Main process pushes wmux-orchestrator state.json updates; we mirror them
@@ -390,6 +393,7 @@ export default function Sidebar({
           onCreate={onCreate}
           onCreateFromLayout={onCreateFromLayout}
           onManageLayouts={onManageLayouts}
+          onNewWorktree={() => setShowWorktreeModal(true)}
         />
         {sessionMenuMode && (
           <SessionMenu
@@ -425,6 +429,13 @@ export default function Sidebar({
           onCloseOthers={(id) => { handleCloseOthers(id); closeContextMenu(); }}
           onMarkRead={handleMarkRead}
           onMarkUnread={handleMarkUnread}
+        />
+      )}
+
+      {showWorktreeModal && (
+        <NewWorktreeModal
+          onClose={() => setShowWorktreeModal(false)}
+          cwd={activeWorkspace?.cwd}
         />
       )}
     </div>
