@@ -202,6 +202,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
       ports: options.ports,
       notificationText: options.notificationText,
       shellState: options.shellState,
+      worktree: options.worktree,
     };
 
     set((state) => {
@@ -344,6 +345,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
       explorerWidth: config.explorerWidth,
       explorerExpanded: config.explorerExpanded,
       explorerShowHidden: config.explorerShowHidden,
+      worktree: config.worktree,
     }));
 
     // IDs are regenerated above, so a saved activeWorkspaceId is meaningless —

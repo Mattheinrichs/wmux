@@ -1197,6 +1197,7 @@ export default function App() {
             explorerWidth: ws.explorerWidth,
             explorerExpanded: ws.explorerExpanded,
             explorerShowHidden: ws.explorerShowHidden,
+            worktree: ws.worktree,
           })),
         }],
       };
@@ -1377,6 +1378,7 @@ export default function App() {
         explorerWidth: ws.explorerWidth,
         explorerExpanded: ws.explorerExpanded,
         explorerShowHidden: ws.explorerShowHidden,
+        // worktree is deliberately omitted (§5.4): named sessions are reusable templates; saving a live checkout into a template would cause two workspaces to claim the same directory.
       })),
       sidebarWidth: sidebarWidthRef.current,
       terminalPrefs: { ...state.terminalPrefs },
