@@ -3,6 +3,18 @@ import type { ILinkProviderOptions } from '@xterm/addon-web-links';
 import { openInWmuxBrowser } from './open-in-browser';
 import { isHttpUrl } from './open-link';
 
+export const FILE_LINK_PREFIX = 'wmux-file:';
+
+export function isFileLinkUri(uri: string | undefined): uri is string {
+  return typeof uri === 'string' && uri.startsWith(FILE_LINK_PREFIX) && uri.length > FILE_LINK_PREFIX.length;
+}
+
+export function activateFileLink(event: MouseEvent, uri: string, openFile?: (path: string) => void): void {
+  if (!isFileLinkUri(uri) || !openFile) return;
+  if (!event?.ctrlKey && !event?.metaKey) return;
+  openFile(uri.slice(FILE_LINK_PREFIX.length));
+}
+
 /** xterm's `terminal.modes.mouseTrackingMode` — public API since xterm 5. */
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 
@@ -72,7 +84,7 @@ export function claimsLinkMouseDown(
 ): boolean {
   if (mouseTracking === 'none' || event.button !== 0) return false;
   if (!event.ctrlKey && !event.metaKey) return false;
-  return isHttpUrl(hoveredUri);
+  return isHttpUrl(hoveredUri) || isFileLinkUri(hoveredUri);
 }
 
 type LinkHoverOptions = Required<Pick<ILinkProviderOptions, 'hover' | 'leave'>>;
@@ -91,14 +103,25 @@ type LinkHoverOptions = Required<Pick<ILinkProviderOptions, 'hover' | 'leave'>>;
  * on its release, because xterm's Linkifier never saw the press and would not
  * activate the link on its own.
  */
-export function createTerminalLinkActivation(getMouseTracking: () => MouseTrackingMode): {
+export function createTerminalLinkActivation(
+  getMouseTracking: () => MouseTrackingMode,
+  openFile?: (path: string) => void,
+): {
   activate: (event: MouseEvent, uri: string) => void;
   linkHandler: ILinkHandler;
   webLinkOptions: LinkHoverOptions;
+  fileLinkHandlers: {
+    activate: (event: MouseEvent, uri: string) => void;
+    hover: (event: MouseEvent, uri: string) => void;
+    leave: (event: MouseEvent, uri: string) => void;
+  };
   claimMouseDown: (event: MouseEvent) => boolean;
   claimMouseUp: (event: MouseEvent) => boolean;
 } {
-  const activate = (event: MouseEvent, uri: string) => activateTerminalLink(event, uri, getMouseTracking());
+  const activate = (event: MouseEvent, uri: string) => {
+    if (isFileLinkUri(uri)) activateFileLink(event, uri, openFile);
+    else activateTerminalLink(event, uri, getMouseTracking());
+  };
 
   let hoveredUri: string | undefined;
   let claimedUri: string | undefined;
@@ -125,6 +148,7 @@ export function createTerminalLinkActivation(getMouseTracking: () => MouseTracki
     activate,
     linkHandler: { activate, hover, leave },
     webLinkOptions: { hover, leave },
+    fileLinkHandlers: { activate, hover, leave },
     claimMouseDown,
     claimMouseUp,
   };

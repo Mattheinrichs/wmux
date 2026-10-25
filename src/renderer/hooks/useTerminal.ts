@@ -16,6 +16,8 @@ import { UserColorScheme } from '../store/settings-slice';
 import { normalizeOscTitle, isConsoleDefaultTitle } from '../store/osc-title-slice';
 import { terminalBgAlpha } from '../store/backdrop';
 import { createTerminalLinkActivation } from '../utils/terminal-links';
+import { createFileLinkProvider } from '../utils/terminal-file-links';
+import { openTerminalFileLink, terminalFileLinkExists } from '../utils/open-terminal-file-link';
 import {
   MouseModeState,
   applyMouseModeSequences,
@@ -938,7 +940,11 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     // Link clicks for both of xterm's link sources. A plain click on a link is
     // left to the app while it has mouse tracking on (#280) — see
     // utils/terminal-links. The getter runs on click, after `terminal` exists.
-    const links = createTerminalLinkActivation(() => terminal.modes.mouseTrackingMode);
+    const linkSurfaceId = surfaceId as SurfaceId | undefined;
+    const links = createTerminalLinkActivation(
+      () => terminal.modes.mouseTrackingMode,
+      linkSurfaceId ? (path) => { void openTerminalFileLink(linkSurfaceId, path); } : undefined,
+    );
 
     // Create terminal instance. Theme/font are applied from settings on creation
     // AND kept in sync via a later effect, so live edits repaint without recreation.
@@ -1004,6 +1010,13 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     terminal.loadAddon(unicode11Addon);
     terminal.loadAddon(imageAddon);
     terminal.loadAddon(serializeAddon);
+    if (linkSurfaceId) {
+      terminal.registerLinkProvider(createFileLinkProvider(
+        terminal,
+        (path) => terminalFileLinkExists(linkSurfaceId, path),
+        links.fileLinkHandlers,
+      ));
+    }
     terminal.unicode.activeVersion = '11';
 
     // OSC 9;4 progress (ConEmu/Windows Terminal convention) → store, keyed by
