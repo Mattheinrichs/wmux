@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { WorkspaceId, WorkspaceInfo, SplitNode, SavedLayout } from '../../shared/types';
 import { isPosixPath } from '../../shared/paths';
 import { buildWorkspaceTree, WorkspaceLayout, instantiateLayout, freezeSurfaceCwds, dropEphemeralSurfaces, dropCodeContent, mergeStartupCommands } from './split-utils';
-import { killTreeTerminalPtys } from './pty-teardown';
+import { killDroppedSurfaces, killTreeTerminalPtys } from './pty-teardown';
 // The one module that owns every tab-label rule. It is pure (no React), so the
 // store importing it pulls in nothing but the label helpers.
 import { deriveWorkspaceTitle } from '../components/SplitPane/surface-label';
@@ -352,6 +352,13 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
       typeof activeIndex === 'number' && newWorkspaces.length > 0
         ? Math.max(0, Math.min(activeIndex, newWorkspaces.length - 1))
         : 0;
+
+    // Load session swaps the whole layout at once, so it is a close path too
+    // (#361): whatever the old layout held and the new one does not must lose
+    // its shell here, as closeWorkspace does. A startup restore has nothing to
+    // drop (the store starts empty), and a surface both layouts hold keeps its
+    // live terminal through the keep-alive host (#346).
+    killDroppedSurfaces(get().workspaces.map((w) => w.splitTree), newWorkspaces.map((w) => w.splitTree));
 
     set({
       workspaces: newWorkspaces,

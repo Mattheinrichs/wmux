@@ -69,3 +69,32 @@ export function killTreeTerminalPtys(tree: SplitNode): void {
   killTreeTerminalPtys(tree.children[0]);
   killTreeTerminalPtys(tree.children[1]);
 }
+
+/** Every surface id in a split (sub)tree, all types. */
+function collectSurfaceIds(tree: SplitNode, into: Set<string>): Set<string> {
+  if (tree.type === 'leaf') {
+    for (const surface of tree.surfaces) into.add(surface.id);
+  } else {
+    collectSurfaceIds(tree.children[0], into);
+    collectSurfaceIds(tree.children[1], into);
+  }
+  return into;
+}
+
+/** Close every surface of `outgoing` that `incoming` does not also hold (#361).
+ *  Used when the whole layout is swapped at once (Load session): a surface the
+ *  incoming layout keeps is re-parented by the keep-alive host (#346) and must
+ *  keep its shell, everything else is closed like any other close path. */
+export function killDroppedSurfaces(outgoing: SplitNode[], incoming: SplitNode[]): void {
+  const kept = new Set<string>();
+  for (const tree of incoming) collectSurfaceIds(tree, kept);
+  const visit = (tree: SplitNode): void => {
+    if (tree.type === 'leaf') {
+      for (const surface of tree.surfaces) if (!kept.has(surface.id)) killSurfacePty(surface);
+      return;
+    }
+    visit(tree.children[0]);
+    visit(tree.children[1]);
+  };
+  for (const tree of outgoing) visit(tree);
+}
