@@ -406,6 +406,8 @@ contextBridge.exposeInMainWorld('wmux', {
     // `markdown.readFile` below takes an absolute path and mints nothing.
     readMarkdown: (surfaceId: string, relPath: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.EXPLORER_READ_MARKDOWN, surfaceId, relPath),
+    resolveTerminalLink: (surfaceId: string, text: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RESOLVE_FILE_LINK, surfaceId, text),
   },
   code: {
     // Same rule as `explorer` above: a surfaceId and a RELATIVE path, never an
