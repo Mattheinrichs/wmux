@@ -57,7 +57,8 @@ import { applyHistoryRestore, claimHistoryRestore, forgetHistoryRestore, parkHis
 import { stampAgentSessionIds } from './agent-session-persistence';
 import { noteIconRevision } from './icon-cache';
 import { installGpuWatchdog } from './gpu-watchdog';
-import { getAgentState, currentPromptId, currentPromptView, reportAgentSession, isAnsweringInput, noteHumanInput, onAgentStateBroadcast, onAgentSessionChanged, releaseAgyAtPrompt } from './agent-state';
+import { getAgentState, currentPromptId, currentPromptView, reportAgentSession, isAnsweringInput, noteHumanInput, onAgentStateBroadcast, onAgentSessionChanged, releaseAgyAtPrompt, listAgentStates } from './agent-state';
+import { getAwakeManager } from './awake-manager';
 import {
   pruneDeadClaudeSessions,
   listKnownTranscriptIds,
@@ -1509,6 +1510,20 @@ app.whenReady().then(() => {
   // (issue #229); the renderer probes for frames, this restarts the process.
   installGpuWatchdog();
 
+  // Keep Windows awake dynamically when coding agents are working
+  const awakeManager = getAwakeManager();
+  awakeManager.onStateChange((state) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC_CHANNELS.AWAKE_STATE_CHANGED, state);
+      }
+    }
+  });
+  onAgentStateBroadcast(() => {
+    const workingCount = listAgentStates().filter((s) => s.state === 'working').length;
+    awakeManager.onWorkingAgentsCountChanged(workingCount);
+  });
+
   // Tree-kill whatever a previously CRASHED instance left running (issue #139).
   // `will-quit` — the only thing that calls killAll() — does not run on a crash,
   // and Windows does not tear down a process tree when its root dies, so every
@@ -2322,6 +2337,11 @@ app.whenReady().then(() => {
 
 app.on('before-quit', (event) => {
   isQuitting = true;
+  try {
+    getAwakeManager().dispose();
+  } catch {
+    /* ignore */
+  }
   // Cancel pending auto-save timer
   if (autoSaveTimer !== null) {
     clearTimeout(autoSaveTimer);

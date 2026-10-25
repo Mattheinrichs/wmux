@@ -139,3 +139,31 @@ export class AwakeManager {
     }
   }
 }
+
+let instance: AwakeManager | null = null;
+
+export function getAwakeManager(): AwakeManager {
+  if (!instance) {
+    instance = new AwakeManager();
+  }
+  return instance;
+}
+
+export function initAwakeManager(
+  driver?: PowerBlockerDriver,
+  initialMode: KeepAwakeMode = 'smart',
+  initialPreventDisplay = false
+): AwakeManager {
+  if (instance) {
+    instance.dispose();
+  }
+  instance = new AwakeManager(driver, initialMode, initialPreventDisplay);
+  return instance;
+}
+
+export function resetAwakeManager(): void {
+  if (instance) {
+    instance.dispose();
+    instance = null;
+  }
+}
