@@ -76,11 +76,11 @@ export default function Titlebar({
 
   useEffect(() => {
     let unmounted = false;
-    window.wmux?.awake?.getState?.().then((st) => {
+    window.wmux?.awake?.getState?.().then((st: KeepAwakeState) => {
       if (!unmounted && st) setAwakeState(st);
     }).catch(() => {});
 
-    const unsubscribe = window.wmux?.awake?.onStateChange?.((st) => {
+    const unsubscribe = window.wmux?.awake?.onStateChange?.((st: KeepAwakeState) => {
       if (!unmounted && st) setAwakeState(st);
     });
 
@@ -93,7 +93,7 @@ export default function Titlebar({
   const cycleAwakeMode = useCallback(() => {
     const nextMode: KeepAwakeMode =
       awakeState.mode === 'smart' ? 'always' : awakeState.mode === 'always' ? 'off' : 'smart';
-    window.wmux?.awake?.setMode?.(nextMode).then((st) => {
+    window.wmux?.awake?.setMode?.(nextMode).then((st: KeepAwakeState) => {
       if (st) {
         setAwakeState(st);
         useStore.getState().setWorkspacePrefs({ keepAwakeMode: st.mode });
