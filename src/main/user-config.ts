@@ -117,6 +117,10 @@ export interface UserConfig {
      * in minutes; `0` switches it off (issue #238).
      */
     snapshotMinutes?: number;
+    keepAwake?: {
+      mode?: 'smart' | 'always' | 'off';
+      preventDisplaySleep?: boolean;
+    };
   };
   /** Browser surface behavior — dev-server port detection & auto-navigation. */
   browser?: {
@@ -482,6 +486,23 @@ function mapWorkspaceSection(root: TomlTable, errors: string[]): NonNullable<Use
       }
       out.snapshotMinutes = clamped;
     }
+  }
+
+  const keepAwakeTable = asTable(workspace['keep-awake'] ?? workspace.keepAwake ?? root['keep-awake']);
+  if (keepAwakeTable) {
+    const keepAwake: NonNullable<NonNullable<UserConfig['workspace']>['keepAwake']> = {};
+    const mode = asString(keepAwakeTable.mode);
+    if (mode === 'smart' || mode === 'always' || mode === 'off') {
+      keepAwake.mode = mode;
+    } else if (mode !== undefined) {
+      errors.push(`workspace.keep-awake.mode: "${mode}" not one of smart|always|off`);
+    }
+
+    const preventDisplay = asBool(keepAwakeTable['prevent-display-sleep'] ?? keepAwakeTable.preventDisplaySleep);
+    if (preventDisplay !== undefined) {
+      keepAwake.preventDisplaySleep = preventDisplay;
+    }
+    if (Object.keys(keepAwake).length) out.keepAwake = keepAwake;
   }
 
   return Object.keys(out).length ? out : undefined;

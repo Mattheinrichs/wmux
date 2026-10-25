@@ -94,7 +94,10 @@ export default function Titlebar({
     const nextMode: KeepAwakeMode =
       awakeState.mode === 'smart' ? 'always' : awakeState.mode === 'always' ? 'off' : 'smart';
     window.wmux?.awake?.setMode?.(nextMode).then((st) => {
-      if (st) setAwakeState(st);
+      if (st) {
+        setAwakeState(st);
+        useStore.getState().setWorkspacePrefs({ keepAwakeMode: st.mode });
+      }
     }).catch(() => {});
   }, [awakeState.mode]);
   return (

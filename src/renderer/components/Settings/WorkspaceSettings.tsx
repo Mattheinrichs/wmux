@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../../store';
 import { useT } from '../../i18n';
 import { getAllPaneIds, findLeaf, patchLeafPrimarySurface, MAX_WORKSPACE_PANES } from '../../store/split-utils';
-import type { PaneId, WorkspaceLayout } from '../../../shared/types';
+import type { PaneId, WorkspaceLayout, KeepAwakeMode } from '../../../shared/types';
 
 /**
  * One editable startup-command line for a saved layout's pane.
@@ -395,6 +395,49 @@ export default function WorkspaceSettings() {
         {t(
           'settings.workspacePanel.autoOpenDiffHint',
           'When an agent edits or writes files, wmux pops a diff tab in the bottom pane. Turn this off to stop it appearing.',
+        )}
+      </p>
+
+      <div className="settings-row">
+        <label className="settings-label">{t('settings.workspacePanel.keepAwakeMode', 'Keep computer awake')}</label>
+        <select
+          className="settings-select"
+          value={workspacePrefs.keepAwakeMode ?? 'smart'}
+          onChange={(e) => {
+            const mode = e.target.value as KeepAwakeMode;
+            setWorkspacePrefs({ keepAwakeMode: mode });
+            window.wmux?.awake?.setMode?.(mode);
+          }}
+        >
+          <option value="smart">{t('settings.workspacePanel.keepAwakeSmart', 'Smart (when agents are active)')}</option>
+          <option value="always">{t('settings.workspacePanel.keepAwakeAlways', 'Always (keep awake while wmux is open)')}</option>
+          <option value="off">{t('settings.workspacePanel.keepAwakeOff', 'Off (system defaults)')}</option>
+        </select>
+      </div>
+      <p className="settings-hint">
+        {t(
+          'settings.workspacePanel.keepAwakeHint',
+          'Prevents Windows from sleeping while coding agents are working. Smart mode automatically blocks sleep while agents are active, and releases it when idle or blocked on human input.',
+        )}
+      </p>
+
+      <div className="settings-row">
+        <label className="settings-label">{t('settings.workspacePanel.preventDisplaySleep', 'Keep display awake')}</label>
+        <input
+          type="checkbox"
+          className="settings-toggle"
+          checked={workspacePrefs.preventDisplaySleep ?? false}
+          onChange={(e) => {
+            const prevent = e.target.checked;
+            setWorkspacePrefs({ preventDisplaySleep: prevent });
+            window.wmux?.awake?.setPreventDisplaySleep?.(prevent);
+          }}
+        />
+      </div>
+      <p className="settings-hint">
+        {t(
+          'settings.workspacePanel.preventDisplaySleepHint',
+          'Also keep screens awake to prevent Windows lock screen or display timeout. When disabled (default), system sleep is prevented while screens may turn off.',
         )}
       </p>
 
