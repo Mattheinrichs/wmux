@@ -146,16 +146,74 @@ const QWEN_EVENT_HOOKS: ReadonlyArray<{ event: string; async: boolean }> = [
 /** Every hook array wmux writes into — and therefore the only ones it removes from. */
 export const QWEN_HOOK_EVENTS = ['PostToolUse', ...QWEN_EVENT_HOOKS.map(h => h.event)];
 
+/**
+ * The hook script as it appears on Qwen's command line: bare when it can be,
+ * quoted only when it must.
+ *
+ * Bare is not cosmetic. Launched from PowerShell or cmd (no `MSYSTEM`), Qwen
+ * runs a hook as `spawn(ComSpec, ['/d', '/s', '/c', command], {shell: false})`
+ * WITHOUT `windowsVerbatimArguments` — so Node escapes every `"` in the command
+ * as `\"`, cmd.exe does not unescape it, and node receives a literal quote:
+ * `node "C:/Users/me/OneDrive - Org/…/wmux-hook.js"` arrived as
+ * `"C:/Users/me/OneDrive` and died on MODULE_NOT_FOUND, so a Qwen pane started
+ * from pwsh never reported a single event. Measured on Qwen 0.26.1; from Git
+ * Bash it picks bash instead, which is why a probe run THERE passes. A command
+ * with no quotes at all reads the same to cmd, bash and PowerShell.
+ */
+export function qwenHookTarget(hookScript: string): string {
+  return /^[\w.:/~-]+$/.test(hookScript) ? hookScript : `"${hookScript}"`;
+}
+
 export function qwenToolHookCommand(hookScript: string, tool: string): string {
-  return `node "${hookScript}" ${tool} ${QWEN_PROVIDER_ARG}`;
+  return `node ${qwenHookTarget(hookScript)} ${tool} ${QWEN_PROVIDER_ARG}`;
 }
 
 export function qwenEventHookCommand(hookScript: string, event: string): string {
-  return `node "${hookScript}" --event ${event} ${QWEN_PROVIDER_ARG}`;
+  return `node ${qwenHookTarget(hookScript)} --event ${event} ${QWEN_PROVIDER_ARG}`;
 }
 
-/** `node "<anything>wmux-hook.js" … --provider qwen` — the only shape wmux writes. */
-const WMUX_QWEN_COMMAND_RE = /^node "[^"]*wmux-hook\.js" .*--provider qwen$/;
+/**
+ * Every shape wmux has written: the quoted path to resources/cli/wmux-hook.js
+ * (≤ 2.42.0) and the bare or quoted path to the stub in Qwen's home.
+ */
+const WMUX_QWEN_COMMAND_RE = /^node (?:"[^"]*(?:wmux-hook\.js|wmux-qwen-hook\.cjs)"|\S*(?:wmux-hook\.js|wmux-qwen-hook\.cjs)) .*--provider qwen$/;
+
+/**
+ * The stub Qwen's hooks run: one `require` of the real helper, written into
+ * Qwen's home. The install path (`…/OneDrive - Org/…/resources/cli`) is where
+ * the spaces are, and inside a JS string literal no shell ever sees it; Qwen's
+ * home is usually space-free, so the command needs no quotes (see
+ * {@link qwenHookTarget}). `process.argv.slice(2)` is the same through the
+ * stub, and the helper resolves its own siblings from its real location.
+ * Known gap: a Qwen home WITH a space still gets the quoted form, which cmd
+ * breaks — only Qwen passing `windowsVerbatimArguments` fixes that.
+ */
+export const QWEN_HOOK_STUB = 'wmux-qwen-hook.cjs';
+const STUB_MARKER = '// wmux-qwen-hook: written by wmux';
+
+export function qwenHookStubSource(hookScript: string): string {
+  return `${STUB_MARKER}. Qwen Code hooks run this; regenerated on every wmux launch.\nrequire(${JSON.stringify(hookScript)});\n`;
+}
+
+const stubPathIn = (home: string) => path.join(home, QWEN_HOOK_STUB);
+
+/** Writes the stub when it differs; answers the forward-slashed path commands name. */
+function ensureQwenHookStub(home: string, hookScript: string): string {
+  const stubPath = stubPathIn(home);
+  const source = qwenHookStubSource(hookScript);
+  let existing: string | null = null;
+  try { existing = fs.readFileSync(stubPath, 'utf-8'); } catch { /* not written yet */ }
+  if (existing !== source) fs.writeFileSync(stubPath, source, 'utf-8');
+  return stubPath.split(path.sep).join('/');
+}
+
+/** Deletes the stub — only one wmux wrote, never a user's file of that name. */
+function removeQwenHookStub(home: string): void {
+  const stubPath = stubPathIn(home);
+  try {
+    if (fs.readFileSync(stubPath, 'utf-8').startsWith(STUB_MARKER)) fs.unlinkSync(stubPath);
+  } catch { /* absent */ }
+}
 
 function isWmuxQwenEntry(entry: unknown): boolean {
   const hooks = (entry as { hooks?: unknown })?.hooks;
@@ -247,7 +305,7 @@ function updateQwenSettings(
 export function ensureQwenHooks(): void {
   try {
     if (!isDirectory(getQwenHome())) return;
-    const hookScript = getHookScriptPath();
+    const hookScript = ensureQwenHookStub(getQwenHome(), getHookScriptPath());
     if (updateQwenSettings(getQwenSettingsPath(), s => applyQwenHooks(s, hookScript), true)) {
       console.log(`[wmux] Configured ${QWEN_HOOK_EVENTS.join('/')} hooks in`, getQwenSettingsPath());
     }
@@ -262,6 +320,7 @@ export function removeQwenHooks(): void {
       if (updateQwenSettings(settingsPathIn(home), removeQwenHooksFrom, false)) {
         console.log('[wmux] Removed wmux hooks from', settingsPathIn(home));
       }
+      removeQwenHookStub(home);
     } catch (err) {
       console.warn('[wmux] Failed to remove Qwen hooks:', err);
     }

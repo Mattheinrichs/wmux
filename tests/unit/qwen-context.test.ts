@@ -12,6 +12,8 @@ import {
   getQwenSettingsPath,
   QWEN_HOOK_EVENTS,
   qwenEventHookCommand,
+  qwenHookTarget,
+  QWEN_HOOK_STUB,
   removeQwenContext,
   removeQwenHooks,
   removeQwenHooksFrom,
@@ -98,9 +100,27 @@ describe('qwen context', () => {
       const next = applyQwenHooks({}, HOOK);
       for (const event of QWEN_HOOK_EVENTS) expect(next.hooks[event]?.length).toBeGreaterThan(0);
       expect(next.hooks.StopFailure[0].hooks[0].command).toBe(qwenEventHookCommand(HOOK, 'StopFailure'));
-      expect(next.hooks.StopFailure[0].hooks[0].command).toBe(`node "${HOOK}" --event StopFailure --provider qwen`);
+      expect(next.hooks.StopFailure[0].hooks[0].command).toBe(`node ${HOOK} --event StopFailure --provider qwen`);
       const bash = next.hooks.PostToolUse.find((e: any) => e.matcher === 'Bash');
-      expect(bash.hooks[0].command).toBe(`node "${HOOK}" Bash --provider qwen`);
+      expect(bash.hooks[0].command).toBe(`node ${HOOK} Bash --provider qwen`);
+    });
+
+    // Qwen on Windows runs a hook through cmd.exe /d /s /c WITHOUT verbatim
+    // arguments, so Node turns every `"` into `\"` that cmd never unescapes and
+    // node gets a literal quote. A path that needs no quotes must get none.
+    it('writes a space-free script path bare, and quotes only one that needs it', () => {
+      expect(qwenHookTarget('C:/Users/me/.qwen/wmux-qwen-hook.cjs')).toBe('C:/Users/me/.qwen/wmux-qwen-hook.cjs');
+      expect(qwenHookTarget('C:/Users/John Smith/.qwen/wmux-qwen-hook.cjs')).toBe('"C:/Users/John Smith/.qwen/wmux-qwen-hook.cjs"');
+      expect(qwenHookTarget('C:/a&b/x.cjs')).toBe('"C:/a&b/x.cjs"');
+    });
+
+    it('replaces the quoted ≤ 2.42.0 entry pointing into a spaced install path', () => {
+      const legacy = 'node "C:/Users/me/OneDrive - Org/wmux/resources/cli/wmux-hook.js" --event Stop --provider qwen';
+      const old = { hooks: { Stop: [{ hooks: [{ type: 'command', command: legacy }] }] } };
+      const next = applyQwenHooks(old, 'C:/Users/me/.qwen/wmux-qwen-hook.cjs');
+      expect(next.hooks.Stop).toHaveLength(1);
+      expect(next.hooks.Stop[0].hooks[0].command).toBe('node C:/Users/me/.qwen/wmux-qwen-hook.cjs --event Stop --provider qwen');
+      expect(removeQwenHooksFrom(next)).toEqual({});
     });
 
     it('keeps user hooks and keys, and is idempotent', () => {
@@ -139,6 +159,26 @@ describe('qwen context', () => {
       removeQwenHooks();
       removeQwenMcp();
       expect(JSON.parse(fs.readFileSync(getQwenSettingsPath(), 'utf-8'))).toEqual(userSettings());
+    });
+
+    it('runs hooks through a stub in Qwen\'s home that requires the real helper, and removes it', () => {
+      fs.writeFileSync(getQwenSettingsPath(), '{}');
+      ensureQwenHooks();
+      const stub = path.join(getQwenHome(), QWEN_HOOK_STUB);
+      const source = fs.readFileSync(stub, 'utf-8');
+      expect(source).toMatch(/^require\(".*wmux-hook\.js"\);$/m);
+      const written = JSON.parse(fs.readFileSync(getQwenSettingsPath(), 'utf-8'));
+      const stubRef = stub.split(path.sep).join('/');
+      expect(written.hooks.Stop[0].hooks[0].command).toBe(qwenEventHookCommand(stubRef, 'Stop'));
+      removeQwenHooks();
+      expect(fs.existsSync(stub)).toBe(false);
+    });
+
+    it('never deletes a user file that happens to carry the stub\'s name', () => {
+      const stub = path.join(getQwenHome(), QWEN_HOOK_STUB);
+      fs.writeFileSync(stub, 'console.log("mine")\n');
+      removeQwenHooks();
+      expect(fs.readFileSync(stub, 'utf-8')).toBe('console.log("mine")\n');
     });
 
     it('leaves a settings.json with comments alone rather than strip them', () => {
