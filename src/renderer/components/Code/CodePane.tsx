@@ -35,8 +35,9 @@ import { useStore } from '../../store';
 import { useT } from '../../i18n';
 import { SOURCE_VIRTUALIZE_THRESHOLD } from '../Markdown/markdown-utils';
 import { codeErrorKey } from '../Explorer/explorer-errors';
+import { findSurfaceOwner } from '../../store/split-utils';
 import type {
-  ExplorerErrorCode, PaneId, SplitNode, SurfaceId, SurfaceRef, WorkspaceId,
+  ExplorerErrorCode, SplitNode, SurfaceId, SurfaceRef,
 } from '../../../shared/types';
 import '../../styles/code.css';
 
@@ -151,7 +152,7 @@ export function CodePane({ surfaceId }: { surfaceId: SurfaceId }): React.JSX.Ele
       // Re-resolved from the LIVE state rather than closed over: the surface
       // may have been dragged to another pane while the read was in flight,
       // and updateSurface addresses a surface by (workspace, pane, surface).
-      const owner = findOwner(useStore.getState().workspaces, surfaceId);
+      const owner = findSurfaceOwner(useStore.getState().workspaces, surfaceId);
       if (!owner) return;
       updateSurface(owner.workspaceId, owner.paneId, surfaceId, { codeContent: text });
     }
@@ -166,7 +167,7 @@ export function CodePane({ surfaceId }: { surfaceId: SurfaceId }): React.JSX.Ele
   // matters more than it looks: without it, clicking another file in the tree
   // would silently reuse THIS pane and discard the edit in progress.
   const commit = useCallback((patch: { codeContent?: string; markdownDirty?: boolean }) => {
-    const owner = findOwner(useStore.getState().workspaces, surfaceId);
+    const owner = findSurfaceOwner(useStore.getState().workspaces, surfaceId);
     if (!owner) return;
     updateSurface(owner.workspaceId, owner.paneId, surfaceId, patch);
   }, [surfaceId, updateSurface]);
@@ -390,35 +391,11 @@ export function samePath(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
-// ─── Tree lookups ────────────────────────────────────────────────────────────
-// split-utils exports findLeaf (by paneId) and getAllPaneIds, neither of which
-// answers "which surface/pane/workspace is this surfaceId in?". These two do,
-// and they live here rather than in split-utils because this is their only
-// caller — moving them there when a second one appears is the cheaper direction.
-
 function findSurface(tree: SplitNode, surfaceId: SurfaceId): SurfaceRef | null {
   if (tree.type === 'leaf') {
     return tree.surfaces.find((s) => s.id === surfaceId) ?? null;
   }
   return findSurface(tree.children[0], surfaceId) ?? findSurface(tree.children[1], surfaceId);
-}
-
-function findPane(tree: SplitNode, surfaceId: SurfaceId): PaneId | null {
-  if (tree.type === 'leaf') {
-    return tree.surfaces.some((s) => s.id === surfaceId) ? tree.paneId : null;
-  }
-  return findPane(tree.children[0], surfaceId) ?? findPane(tree.children[1], surfaceId);
-}
-
-function findOwner(
-  workspaces: { id: WorkspaceId; splitTree: SplitNode }[],
-  surfaceId: SurfaceId,
-): { workspaceId: WorkspaceId; paneId: PaneId } | null {
-  for (const ws of workspaces) {
-    const paneId = findPane(ws.splitTree, surfaceId);
-    if (paneId) return { workspaceId: ws.id, paneId };
-  }
-  return null;
 }
 
 export default CodePane;

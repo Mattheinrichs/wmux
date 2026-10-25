@@ -1,5 +1,5 @@
 import { v4 as uuid } from 'uuid';
-import { SplitNode, PaneId, SurfaceId, SurfaceType, SurfaceRef, WorkspaceLayout } from '../../shared/types';
+import { SplitNode, PaneId, SurfaceId, SurfaceType, SurfaceRef, WorkspaceId, WorkspaceLayout } from '../../shared/types';
 
 // ─── Leaf factory ────────────────────────────────────────────────────────────
 
@@ -229,6 +229,24 @@ export function findLeaf(
     return tree.paneId === paneId ? tree : undefined;
   }
   return findLeaf(tree.children[0], paneId) ?? findLeaf(tree.children[1], paneId);
+}
+
+export function findSurfacePane(tree: SplitNode, surfaceId: SurfaceId): PaneId | null {
+  if (tree.type === 'leaf') {
+    return tree.surfaces.some((s) => s.id === surfaceId) ? tree.paneId : null;
+  }
+  return findSurfacePane(tree.children[0], surfaceId) ?? findSurfacePane(tree.children[1], surfaceId);
+}
+
+export function findSurfaceOwner(
+  workspaces: { id: WorkspaceId; splitTree: SplitNode }[],
+  surfaceId: SurfaceId,
+): { workspaceId: WorkspaceId; paneId: PaneId } | null {
+  for (const ws of workspaces) {
+    const paneId = findSurfacePane(ws.splitTree, surfaceId);
+    if (paneId) return { workspaceId: ws.id, paneId };
+  }
+  return null;
 }
 
 // ─── updateRatio ─────────────────────────────────────────────────────────────
