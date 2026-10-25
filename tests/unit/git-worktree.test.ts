@@ -23,6 +23,7 @@ describe('git-worktree pure functions', () => {
       { name: 'x.lock', desc: 'ends with .lock' },
       { name: '.hidden', desc: 'starts with dot' },
       { name: '/abs', desc: 'starts with slash' },
+      { name: 'feat/', desc: 'ends with trailing slash' },
       { name: 'a b', desc: 'contains space' },
       { name: '', desc: 'empty string' },
       { name: 'a'.repeat(201), desc: '201-character string' },
@@ -68,14 +69,11 @@ describe('git-worktree pure functions', () => {
       const repo = '/repos/very-long-repository-name-that-exceeds-slug-max';
       const branch = 'feature/very-long-branch-name-that-also-exceeds-slug-max';
       const slug = worktreeSlug(repo, branch);
-      const segments = slug.split('/');
-      for (const seg of segments) {
-        // split by slash, but hash is attached to branchSlug part with hyphen
-        // Let's check parts
-        const basePart = seg.split('-')[0];
-        expect(basePart.length).toBeLessThanOrEqual(SLUG_MAX);
-      }
-      expect(slug.length).toBeLessThan(120);
+      const [repoSlug, rest] = slug.split('/');
+      const branchSlug = rest.slice(0, rest.lastIndexOf('-'));
+      expect(repoSlug.length).toBeLessThanOrEqual(SLUG_MAX);
+      expect(branchSlug.length).toBeLessThanOrEqual(SLUG_MAX);
+      expect(path.join(worktreeRoot(), slug).length).toBeLessThanOrEqual(96);
     });
   });
 
@@ -143,7 +141,7 @@ describe('git-worktree pure functions', () => {
   describe('classifyWorktreeDir (8 boolean combinations)', () => {
     const cases = [
       { hasGitFile: false, isEmpty: true, gitAnswered: true, expected: 'leftover' },
-      { hasGitFile: false, isEmpty: true, gitAnswered: false, expected: 'leftover' }, // Wait, check implementation: if (!hasGitFile && isEmpty) -> leftover
+      { hasGitFile: false, isEmpty: true, gitAnswered: false, expected: 'leftover' },
       { hasGitFile: false, isEmpty: false, gitAnswered: true, expected: 'unreachable' },
       { hasGitFile: false, isEmpty: false, gitAnswered: false, expected: 'unreachable' },
       { hasGitFile: true, isEmpty: true, gitAnswered: true, expected: 'live' },
