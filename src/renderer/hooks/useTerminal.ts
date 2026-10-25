@@ -24,9 +24,17 @@ import {
   takeMouseModeReplay,
 } from '../utils/mouse-modes';
 import { attachVisibleRenderer, RendererHandle } from '../utils/terminal-renderer';
-import { resetTerminalModes, shellOwnsScreen } from '../utils/terminal-reset';
+import { resetTerminalModes } from '../utils/terminal-reset';
 import { trackScreenEvents } from '../utils/screen-report';
-import { forgetSurfaceShellState, previousSurfaceShellState, treeSurfaceIds, workspaceShellState } from '../utils/surface-shell-state';
+import {
+  applyManualReset,
+  beginSnapshotReplay,
+  dispatchResetNotice,
+  endSnapshotReplay,
+  forgetAlternateScreen,
+  trackAlternateScreenOwner,
+} from '../utils/alt-screen-owner';
+import { forgetSurfaceShellState, treeSurfaceIds, workspaceShellState } from '../utils/surface-shell-state';
 import { forgetProgressTurn, noteSurfaceProgress } from '../utils/progress-turn';
 import { windowsPtyCompat } from '../utils/windows-pty';
 import { ReplayHold } from '../utils/replay-hold';
@@ -1081,7 +1089,11 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
         // set moves the cursor the same way on each.
         replayHold.hold();
         terminal.resize(snapshot.cols, snapshot.rows);
+        // The replayed ?1049h is the old screen coming back, not a program
+        // entering it; Reset terminal state already knows who is on it (#357).
+        beginSnapshotReplay(surfaceId);
         terminal.write(snapshot.text, () => {
+          endSnapshotReplay(surfaceId);
           // Parsed at last. Release, and grow to the pane's real size — applied
           // to xterm and the PTY together, which is the single in-step growth
           // `windowsPty` makes correct on both sides. Not only when a sync was
@@ -1511,6 +1523,12 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     // an anchored viewport go (issue #207). See registerPromptMarks.
     const promptMarkDisposable = registerPromptMarks(terminal, surfaceId);
 
+    // Who is on the alternate screen, for Reset terminal state (#357). Prompt
+    // starts reach it through the OSC 133 handler just registered.
+    const altScreenDisposable = surfaceId
+      ? trackAlternateScreenOwner(terminal, surfaceId, { notify: dispatchResetNotice })
+      : null;
+
     // OSC 52: clipboard write — emitted by tmux when text is copied (set-clipboard on).
     // navigator.clipboard.writeText() requires a user-gesture context which PTY data
     // callbacks don't have, so we go through Electron's clipboard module via IPC.
@@ -1657,6 +1675,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
         // default colours rather than inside the corpse of an alt screen
         // (issue #175). Nothing here is written to the PTY — there is no PTY.
         resetTerminalModes(terminal);
+        forgetAlternateScreen(id);
         terminal.writeln('\r\n\x1b[2m[process exited]\x1b[0m');
         clearStuckRunningState(id);
         forgetProgressTurn(id);
@@ -1869,6 +1888,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
       titleDisposable?.dispose();
       screenEventsDisposable?.dispose();
       promptMarkDisposable?.dispose();
+      altScreenDisposable?.dispose();
 
       // Release every marker this terminal owned (issue #207).
       //
@@ -1974,23 +1994,29 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
   // Guarded on the PTY being present rather than on it having exited: after an
   // exit the modes are already reset, and re-running it would be a no-op that
   // still moved the cursor through the DECSC/DECRC sandwich.
+  //
+  // The program that entered the alternate screen may still be running and will
+  // never re-send ?1049h (#347), so whether to leave it is decided per surface
+  // in applyManualReset (#357): leave once a shell has prompted there, keep while
+  // a program may be drawing, force on a second press or from the palette.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.surfaceId !== surfaceId) return;
       const term = xtermRef.current;
       if (!term) return;
-      // The program that entered the alternate screen may still be running and
-      // will never re-send ?1049h (#347): leave it only once the shell is back
-      // at its prompt.
-      const keepAlternateScreen = !surfaceId || !shellOwnsScreen(previousSurfaceShellState(surfaceId));
-      resetTerminalModes(term, { keepAlternateScreen });
+      if (!surfaceId) {
+        resetTerminalModes(term, { keepAlternateScreen: true });
+        return;
+      }
+      applyManualReset(term, surfaceId, {
+        forceLeave: detail?.leaveAlternateScreen === true,
+        notify: dispatchResetNotice,
+      });
       // Drop the replay cache too, or the next remount puts the modes straight
       // back — same coupling as the exit path.
-      if (surfaceId) {
-        surfaceMouseModes.delete(surfaceId);
-        wheelLineAccum.delete(surfaceId);
-      }
+      surfaceMouseModes.delete(surfaceId);
+      wheelLineAccum.delete(surfaceId);
     };
     document.addEventListener('wmux:reset-terminal', handler);
     return () => document.removeEventListener('wmux:reset-terminal', handler);
