@@ -8,6 +8,8 @@ import MarkdownPane from '../Markdown/MarkdownPane';
 import DiffPane from '../Diff/DiffPane';
 import CodePane from '../Code/CodePane';
 import PromptsPane from '../Terminal/PromptsPane';
+import GitPane from '../Git/GitPane';
+import { gitRootFor } from '../Git/open-git';
 import NotificationRing from '../Terminal/NotificationRing';
 import SurfaceTabBar from './SurfaceTabBar';
 import { useStore } from '../../store';
@@ -376,6 +378,15 @@ export default function PaneWrapper({
           {surface.type === 'diff' && <DiffPane surfaceId={surface.id} cwd={surface.cwd ?? workspace?.cwd} />}
           {surface.type === 'code' && <CodePane surfaceId={surface.id} />}
           {surface.type === 'prompts' && <PromptsPane surfaceId={surface.id} />}
+          {/* Pinned to its own folder (#362): it never follows focus. */}
+          {surface.type === 'git' && (
+            <GitPane
+              surfaceId={surface.id}
+              cwd={surface.cwd ?? workspace?.cwd}
+              surface={surface}
+              onPatch={(patch) => updateSurface(workspaceId, paneId, surface.id, patch)}
+            />
+          )}
         </div>
       );
     });
@@ -386,9 +397,11 @@ export default function PaneWrapper({
     }
   };
 
-  const handleNewSurfaceTyped = (type: 'terminal' | 'browser' | 'markdown' | 'prompts') => {
+  const handleNewSurfaceTyped = (type: 'terminal' | 'browser' | 'markdown' | 'prompts' | 'git') => {
     if (activeWorkspaceId) {
-      addSurface(activeWorkspaceId, paneId, type);
+      // A Git tab pins the folder it opens on (#362) — this pane's terminal.
+      const gitRoot = type === 'git' && workspace ? gitRootFor(workspace, paneId) : undefined;
+      addSurface(activeWorkspaceId, paneId, type, gitRoot ? { cwd: gitRoot } : undefined);
     }
   };
 

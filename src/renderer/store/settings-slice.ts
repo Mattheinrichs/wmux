@@ -180,6 +180,8 @@ export type ShortcutAction =
   | 'commandPalette'
   | 'openMarkdownPanel'
   | 'openDiffPanel'
+  // ─── issue #362 ───────────────────────────────────────────────────────────
+  | 'openGitPanel'
   // ─── issue #64: high-value additions ──────────────────────────────────────
   | 'reopenClosedSurface'
   | 'findNext'
@@ -250,6 +252,10 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
   commandPalette:    { key: 'p', ctrl: true, shift: true },
   openMarkdownPanel: { key: 'm', ctrl: true, shift: true },
   openDiffPanel:     { key: 'g', ctrl: true, shift: true },
+  // The project Git view (#362). Ctrl+Alt+G was unbound; G beside the Diff
+  // panel's Ctrl+Shift+G because they answer neighbouring questions. Alt-
+  // modified, so isSafeToIntercept leaves bare Ctrl+G to the terminal.
+  openGitPanel:      { key: 'g', ctrl: true, alt: true },
   // ─── issue #64 ──────────────────────────────────────────────────────────────
   // Defaults collision-checked against the bindings above. All use Shift/Alt or
   // function keys, so isSafeToIntercept() forwards bare-Ctrl combos to the

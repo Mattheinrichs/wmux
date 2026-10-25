@@ -48,6 +48,8 @@ import { getRemoteConsole } from './remote-console';
 import type { RemoteConsoleRuntime } from './remote-console/contract';
 import type { RemoteModesResult, RemoteSnapshotResult } from '../shared/remote-console-config';
 import { getChangedFiles, getFileDiff, getChangedFilesWithBaseline } from './diff-provider';
+import { handleGitView } from './git-view';
+import type { GitViewRequest } from '../shared/git-view';
 import {
   readMarkdownFile,
   isAllowedMarkdownPath,
@@ -1260,6 +1262,10 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
     const diff = await getFileDiff(resolvedCwd, file);
     return { diff };
   });
+
+  // Project Git view (#362). Read-only; every argument is validated in
+  // git-view.ts, which never throws across IPC.
+  ipcMain.handle(IPC_CHANNELS.GIT_VIEW, (_event, request: GitViewRequest) => handleGitView(request));
 
   // Markdown viewer (issue #54): manual "open markdown file" entry point.
   // Shows a native file picker filtered to the allowed extensions, then reads

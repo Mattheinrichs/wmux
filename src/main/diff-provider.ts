@@ -493,8 +493,8 @@ async function getGitChangedFiles(cwd: string): Promise<ChangedFile[]> {
   return out;
 }
 
-/** Render an untracked file as an all-additions diff. */
-function untrackedFileDiff(cwd: string, file: string): string {
+/** Render an untracked file as an all-additions diff. Shared with git-view.ts (#362). */
+export function untrackedFileDiff(cwd: string, file: string): string {
   try {
     const absPath = path.isAbsolute(file) ? file : path.join(cwd, file);
     const resolved = path.resolve(absPath);

@@ -20,7 +20,7 @@ export type SplitNode =
  * actually requires. Both drive the same per-surface prompt log, so neither is a
  * second implementation of anything.
  */
-export type SurfaceType = 'terminal' | 'browser' | 'markdown' | 'diff' | 'code' | 'prompts';
+export type SurfaceType = 'terminal' | 'browser' | 'markdown' | 'diff' | 'code' | 'prompts' | 'git';
 
 /**
  * Which engine backs a `browser` surface.
@@ -138,6 +138,19 @@ export interface SurfaceRef {
    *  surface (issue #116). Persisted for the same reason as `markdownContent`:
    *  split-tree restructures remount the pane and would otherwise reset it. */
   markdownViewMode?: 'preview' | 'source';
+
+  // ─── Project Git view (#362) ───────────────────────────────────────────────
+  // The repository itself is `cwd` (pinned when the tab opens, like a Diff tab
+  // opened from the explorer). These are the review CONTEXT, persisted so a
+  // split-tree remount or a restart keeps it — and, the point of the request,
+  // so focusing another agent's pane never moves it.
+
+  /** Worktree under review (path as `git worktree list` prints it). */
+  gitWorktree?: string;
+  /** Base of the branch review (`develop`, `origin/main`, …). */
+  gitBase?: string;
+  gitMode?: 'working' | 'branch' | 'graph';
+  gitGraphScope?: 'all' | 'local' | 'worktree';
   /** mtime of the backing file as of the last successful load or save (F3).
    *  Compared before overwriting so an agent rewriting the file under the pane
    *  is caught instead of silently losing to whoever saves last. */
@@ -813,6 +826,8 @@ export const IPC_CHANNELS = {
   DIFF_GET_FILES: 'diff:get-files',
   DIFF_GET_DIFF: 'diff:get-diff',
   DIFF_UPDATE: 'diff:update',
+  // The project Git view (#362): one tagged, read-only request per call.
+  GIT_VIEW: 'git:view',
   // Markdown viewer (issue #54) — file picker for the manual "open markdown" UI
   MARKDOWN_OPEN_FILE: 'markdown:open-file',
   // Markdown viewer (issue #116) — path-aware surfaces: re-read a known file

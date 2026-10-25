@@ -10,6 +10,7 @@ import { GLOBAL_IN_EDITOR, IGNORES_KEY_REPEAT, isEditableTarget } from './shortc
 import { matchIndexShortcut, resolveIndexTarget } from '../utils/index-shortcuts';
 import { isSafeToIntercept } from '../utils/shortcut-binding';
 import { followOutputFor, togglePinnedPromptFor, togglePromptOutlineFor } from '../store/prompt-actions';
+import { openGitView } from '../components/Git/open-git';
 import { v4 as uuid } from 'uuid';
 import { useT } from '../i18n';
 
@@ -408,6 +409,9 @@ export function useKeyboardShortcuts(
         const existingIdx = leaf ? leaf.surfaces.findIndex((s) => s.type === 'diff') : -1;
         if (leaf && existingIdx >= 0) st.selectSurface(activeWorkspaceId, focusedPaneId, existingIdx);
         else st.addSurface(activeWorkspaceId, focusedPaneId, 'diff');
+      },
+      openGitPanel: () => {
+        if (activeWorkspaceId) openGitView(useStore.getState(), activeWorkspaceId, focusedPaneId);
       },
       toggleExplorer: () => onToggleExplorer?.(),
       // commandPalette is opened by App.tsx's own listener; keep a no-op so we

@@ -63,6 +63,7 @@ import { installRemoteRendererHandler } from './utils/remote-snapshot';
 import { formatRemoteNotice } from './utils/remote-notice';
 import { SESSION_SAVE_NOW_EVENT } from './utils/session-save-now';
 import { followOutputFor, togglePinnedPromptFor, togglePromptOutlineFor } from './store/prompt-actions';
+import { FOCUS_SURFACE_EVENT, openGitView } from './components/Git/open-git';
 import { useT } from './i18n';
 import type { TranslationKey } from './i18n';
 
@@ -1442,6 +1443,8 @@ export default function App() {
       followOutputFor(terminalSurfaceId);
     } else if (action === 'toggleExplorer') {
       handleToggleExplorer();
+    } else if (action === 'openGitPanel') {
+      if (activeWorkspaceId) openGitView(useStore.getState(), activeWorkspaceId, focusedPaneId);
     } else {
       console.log(`[wmux] Command palette action: ${action}`);
     }
@@ -1488,6 +1491,29 @@ export default function App() {
       entry,
     );
     if (paneId) setFocusedPaneId(paneId);
+  }, []);
+
+  // "Go to worktree terminal" from the Git view (#362): it can switch the
+  // workspace and tab through the store, but the focused PANE is this
+  // component's state, so it asks through the same document-event relay.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const { workspaceId, surfaceId } = (e as CustomEvent<{ workspaceId: WorkspaceId; surfaceId: SurfaceId }>).detail ?? {};
+      if (!workspaceId || !surfaceId) return;
+      const state = useStore.getState();
+      const ws = state.workspaces.find((w) => w.id === workspaceId);
+      if (!ws) return;
+      for (const paneId of getAllPaneIds(ws.splitTree)) {
+        const index = findLeaf(ws.splitTree, paneId)?.surfaces.findIndex((s) => s.id === surfaceId) ?? -1;
+        if (index < 0) continue;
+        state.selectWorkspace(workspaceId);
+        state.selectSurface(workspaceId, paneId, index);
+        setFocusedPaneId(paneId);
+        return;
+      }
+    };
+    document.addEventListener(FOCUS_SURFACE_EVENT, onFocus);
+    return () => document.removeEventListener(FOCUS_SURFACE_EVENT, onFocus);
   }, []);
 
   // The shortcut lives in useKeyboardShortcuts, which has no way to reach this
