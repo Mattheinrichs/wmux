@@ -228,8 +228,11 @@ describe('phone wording (#254, review round 5)', () => {
 describe('AGENTS.md (#254, review round 5)', () => {
   it('describes the two-entry build and the shared chunk, and drops the stale bundle size', () => {
     const md = read('AGENTS.md');
+    // The phone UI's own notes moved beside its code (#368).
+    const phone = read('src/renderer/remote/AGENTS.md');
     expect(md).not.toContain('already at ~1.8 MB');
+    expect(phone).not.toContain('already at ~1.8 MB');
     expect(md).toContain('remote-manifest.json (the console server refuses to serve without it)');
-    expect(md).toMatch(/separate shared chunk that the desktop window loads too/);
+    expect(phone).toMatch(/separate shared chunk that the desktop window loads too/);
   });
 });
