@@ -5,6 +5,7 @@ import { ShortcutAction, ShortcutBinding } from '../../store/settings-slice';
 import { actionLabel } from '../Settings/KeyboardSettings';
 import { useT } from '../../i18n';
 import { RESET_TERMINAL_LEAVE_ALT_ACTION } from '../../utils/alt-screen-owner';
+import { useWorkspaceLabels } from '../SplitPane/use-osc-title';
 import '../../styles/command-palette.css';
 
 interface CommandPaletteProps {
@@ -56,6 +57,7 @@ export default function CommandPalette({ onClose, onAction }: CommandPaletteProp
     savedLayouts, createWorkspaceFromLayout, requestLayoutSave,
   } = useStore();
   const t = useT();
+  const workspaceLabels = useWorkspaceLabels(workspaces);
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -198,7 +200,7 @@ export default function CommandPalette({ onClose, onAction }: CommandPaletteProp
       const currentSuffix = isCurrent ? ` (${t('palette.current')})` : '';
       items.push({
         id: `workspace:${ws.id}`,
-        label: `${ws.title}${currentSuffix}`,
+        label: `${workspaceLabels.get(ws.id) ?? ws.title}${currentSuffix}`,
         category: t('palette.category.workspaces'),
         action: () => {
           selectWorkspace(ws.id);
@@ -223,7 +225,7 @@ export default function CommandPalette({ onClose, onAction }: CommandPaletteProp
 
     return items;
   }, [
-    shortcuts, workspaces, activeWorkspaceId, selectWorkspace, onAction, onClose, t,
+    shortcuts, workspaces, workspaceLabels, activeWorkspaceId, selectWorkspace, onAction, onClose, t,
     savedLayouts, createWorkspaceFromLayout, requestLayoutSave,
   ]);
 

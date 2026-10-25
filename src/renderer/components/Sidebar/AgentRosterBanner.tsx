@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useWorkspaceLabels } from '../SplitPane/use-osc-title';
 import { useStore } from '../../store';
 import { useT } from '../../i18n';
 import { firstWaiting, rollupAgents } from '../../store/agent-rollup';
@@ -25,11 +26,12 @@ export default function AgentRosterBanner({ onFocusAgent, onOpenNavigator }: {
   const agentStates = useStore((s) => s.agentStates);
   const agentIdentities = useStore((s) => s.agentIdentities);
   const agentDetections = useStore((s) => s.agentDetections);
+  const workspaceLabels = useWorkspaceLabels(workspaces);
   const [now, setNow] = useState(() => Date.now());
 
   const rollup = useMemo(
-    () => rollupAgents(workspaces, agentStates, now, agentIdentities, agentDetections),
-    [workspaces, agentStates, agentIdentities, agentDetections, now],
+    () => rollupAgents(workspaces, agentStates, now, agentIdentities, agentDetections, workspaceLabels),
+    [workspaces, agentStates, agentIdentities, agentDetections, now, workspaceLabels],
   );
 
   const { blocked, question, working, total } = rollup.totals;

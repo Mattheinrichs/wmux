@@ -21,7 +21,7 @@ import { rollupAgents } from '../../store/agent-rollup';
 import type { AgentRosterEntry } from '../../store/agent-rollup';
 import { formatDwell } from '../Sidebar/AgentRosterBanner';
 import { WorkspaceId } from '../../../shared/types';
-import { buildLayout } from './office-layout';
+import { buildLayout, officeLayoutKey } from './office-layout';
 import type { OfficeLayout, TablePlacement } from './office-layout';
 import { createSim, stepSim } from './office-sim';
 import type { Character, SimRosterEntry, SimState } from './office-sim';
@@ -30,6 +30,7 @@ import { BODY_FRAMES, FURNITURE, FURNITURE_PALETTE, VARIANTS, rasterize, variant
 import type { FrameName } from './sprites';
 import { MIN_SCALE, MAX_ZOOM, computeCamera, fitZoom, zoomAt } from './camera';
 import type { CameraView } from './camera';
+import { useWorkspaceLabels } from '../SplitPane/use-osc-title';
 import '../../styles/hub.css';
 
 const TILE = 16;
@@ -137,22 +138,24 @@ export default function HubView({ onClose, onFocusAgent }: {
     dialogRef.current?.focus();
   }, []);
 
+  const workspaceLabels = useWorkspaceLabels(workspaces);
   const rollup = useMemo(
-    () => rollupAgents(workspaces, agentStates, now, agentIdentities, agentDetections),
-    [workspaces, agentStates, agentIdentities, agentDetections, now],
+    () => rollupAgents(workspaces, agentStates, now, agentIdentities, agentDetections, workspaceLabels),
+    [workspaces, agentStates, agentIdentities, agentDetections, now, workspaceLabels],
   );
 
-  // Keyed on a stable projection, not on `rollup` itself: rollup's identity
-  // changes every second (dwell tick) while the office geometry only changes
-  // when a workspace or an agent appears, disappears, or is renamed.
+  // Keyed on a stable projection, not on `rollup` itself: see officeLayoutKey.
+  const layoutWorkspaces = useMemo(
+    () => workspaces.map((w) => ({ id: w.id, title: workspaceLabels.get(w.id) ?? w.title })),
+    [workspaces, workspaceLabels],
+  );
   const layoutKey = useMemo(
-    () => workspaces.map((w) => `${w.id}:${w.title}`).join('|')
-      + '||' + rollup.roster.map((e) => `${e.surfaceId}:${e.workspaceId}`).join('|'),
-    [workspaces, rollup],
+    () => officeLayoutKey(layoutWorkspaces, rollup.roster),
+    [layoutWorkspaces, rollup],
   );
   const layout = useMemo(
     () => buildLayout(
-      workspaces.map((w) => ({ id: w.id, title: w.title })),
+      layoutWorkspaces,
       rollup.roster.map((e) => ({ surfaceId: e.surfaceId, workspaceId: e.workspaceId })),
     ),
     // layoutKey IS the projection of both inputs; when it is unchanged, the
