@@ -420,6 +420,15 @@ export default function WorkspaceRow({
 
   const rowBadges = (
     <>
+      {workspace.worktree && (
+        <span
+          className="workspace-row__badge workspace-row__badge--worktree"
+          title={`Worktree: ${workspace.worktree.branch} (base: ${workspace.worktree.baseBranch})`}
+        >
+          [WT]
+        </span>
+      )}
+
       {/* Work odometer: total tool calls this workspace's sessions have made.
           hookActivity[].toolCount is live, monotonic and deliberately never
           garbage-collected — and was rendered nowhere in the app until now.

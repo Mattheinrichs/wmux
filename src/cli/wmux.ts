@@ -980,6 +980,8 @@ async function cmdNewWorkspace(args: string[]): Promise<void> {
     if (args[i] === '--cwd') params.cwd = args[i + 1];
     if (args[i] === '--panes') params.panes = parseInt(args[i + 1], 10);
     if (args[i] === '--layout') params.layout = args[i + 1];
+    if (args[i] === '--worktree') params.worktree = args[i + 1];
+    if (args[i] === '--base') params.base = args[i + 1];
   }
   // A non-numeric --panes must not travel as NaN: it serialises to `null` in
   // JSON and arrives looking like a deliberate value.
@@ -2068,7 +2070,7 @@ interface CommandSpec {
 
 const SURFACE_NOTE = '(surface defaults to $WMUX_SURFACE_ID inside a pane)';
 
-const COMMAND_SPECS = {
+export const COMMAND_SPECS = {
   // System
   ping: { usage: 'wmux ping' },
   identify: { usage: 'wmux identify' },
@@ -2110,10 +2112,12 @@ const COMMAND_SPECS = {
 
   // Workspace
   'new-workspace': {
-    usage: 'wmux new-workspace [--title T] [--shell S] [--cwd D] [--panes N] [--layout L]\n'
-      + '  --panes  1-8 terminal panes (default: the [workspace] setting, 3)\n'
-      + '  --layout grid | columns | rows | left | down | single',
-    value: ['--title', '--shell', '--cwd', '--panes', '--layout'],
+    usage: 'wmux new-workspace [--title T] [--shell S] [--cwd D] [--panes N] [--layout L] [--worktree B] [--base R]\n'
+      + '  --panes     1-8 terminal panes (default: the [workspace] setting, 3)\n'
+      + '  --layout    grid | columns | rows | left | down | single\n'
+      + '  --worktree  Branch name for a dedicated Git worktree workspace\n'
+      + '  --base      Base branch or commit for the worktree (default: HEAD)',
+    value: ['--title', '--shell', '--cwd', '--panes', '--layout', '--worktree', '--base'],
   },
   ssh: { usage: 'wmux ssh [ssh options] <user@host> [--title T]', passthrough: true },
   'close-workspace': { usage: 'wmux close-workspace [workspaceId]' },

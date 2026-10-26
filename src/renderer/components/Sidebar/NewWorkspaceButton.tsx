@@ -30,6 +30,7 @@ interface NewWorkspaceButtonProps {
   onCreate: () => void;
   onCreateFromLayout: (layoutId: string) => void;
   onManageLayouts: () => void;
+  onNewWorktree?: () => void;
 }
 
 /**
@@ -37,7 +38,12 @@ interface NewWorkspaceButtonProps {
  * caret lists every saved layout. Same shape and close rules as the tab bar's
  * split-buttons (SurfaceTabBar), so it behaves the way users already know.
  */
-export default function NewWorkspaceButton({ onCreate, onCreateFromLayout, onManageLayouts }: NewWorkspaceButtonProps) {
+export default function NewWorkspaceButton({
+  onCreate,
+  onCreateFromLayout,
+  onManageLayouts,
+  onNewWorktree,
+}: NewWorkspaceButtonProps) {
   const t = useT();
   // Read from the store rather than passed in, so a layout renamed or deleted in
   // Settings while the menu is open shows up in it immediately.
@@ -149,6 +155,11 @@ export default function NewWorkspaceButton({ onCreate, onCreateFromLayout, onMan
             <div className="surface-tab-menu__hint">{t('sidebar.layoutMenu.empty', 'No saved layouts yet')}</div>
           )}
           <div className="surface-tab-menu__sep" role="separator" />
+          {onNewWorktree && (
+            <button role="menuitem" onClick={() => { close(); onNewWorktree(); }}>
+              {t('sidebar.newWorktreeWorkspace', 'New worktree workspace…')}
+            </button>
+          )}
           <button role="menuitem" onClick={saveCurrent}>
             {t('palette.saveCurrentLayout', 'Save current layout as new preset')}
           </button>

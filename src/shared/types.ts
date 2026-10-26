@@ -35,6 +35,14 @@ export type SurfaceType = 'terminal' | 'browser' | 'markdown' | 'diff' | 'code' 
  */
 export type BrowserEngine = 'web' | 'agent';
 
+export interface WorktreeMetadata {
+  repoRoot: string;      // the MAIN checkout, not this one
+  branch: string;
+  baseBranch: string;
+  baseSha: string;       // D6 — the name moves, the SHA does not
+  worktreePath: string;  // always under the wmux root; nothing else is removable
+}
+
 export interface SurfaceRef {
   id: SurfaceId;
   type: SurfaceType;
@@ -421,6 +429,12 @@ export interface WorkspaceInfo {
   gitBranch?: string;
   gitDirty?: boolean;
   cwd?: string;
+  /**
+   * Git worktree metadata if this workspace is an isolated worktree.
+   * Note: this is NOT cwd: cwd is rewritten by report_pwd on every prompt (§5.3),
+   * so an agent running cd .. moves it.
+   */
+  worktree?: WorktreeMetadata;
   // The last POSIX/WSL directory known for this workspace, kept apart from
   // `cwd` because one workspace can hold panes in two filesystems at once.
   // `cwd` is whichever pane reported last, so a single pwsh/cmd pane rewrites
@@ -904,6 +918,11 @@ export const IPC_CHANNELS = {
   // receives the surface's PTY_DATA so the snapshot is ordered against it.
   REMOTE_RENDERER_REQUEST: 'remote-console:renderer-request',
   REMOTE_RENDERER_REPLY: 'remote-console:renderer-reply',
+  // Git worktree
+  GIT_WORKTREE_CREATE: 'git-worktree:create',
+  GIT_WORKTREE_REMOVE: 'git-worktree:remove',
+  GIT_WORKTREE_PROBE: 'git-worktree:probe',
+  WORKTREE_DELETE_BRANCH: 'worktree:delete-branch',
 } as const;
 
 /**
@@ -992,4 +1011,21 @@ export interface OrchestrationState {
 export function engineOf(surface: { type: SurfaceType; browserEngine?: BrowserEngine }): BrowserEngine {
   if (surface.type !== 'browser') return 'web';
   return surface.browserEngine === 'agent' ? 'agent' : 'web';
+}
+
+
+/**
+ * Preload bridge interface for window.wmux.worktree (#7).
+ */
+export interface WorktreeBridge {
+  create: (repoDir: string, branch: string, base?: string) => Promise<any>;
+  remove: (worktreePath: string) => Promise<any>;
+  probe: (dir: string) => Promise<any>;
+  deleteBranch: (repoRoot: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
+declare global {
+  interface Window {
+    wmux: any;
+  }
 }

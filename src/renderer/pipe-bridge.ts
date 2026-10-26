@@ -11,7 +11,7 @@ import { toRemoteRosterSource } from './utils/remote-roster';
 import { selectWorkspaceLabels } from './components/SplitPane/use-osc-title';
 import { openLinkFromBridge } from './utils/open-link';
 import { readScreenReport } from './utils/screen-report';
-import { PaneId, SurfaceId, WorkspaceId, SurfaceType, engineOf, type BrowserEngine, type WorkspaceLayout } from '../shared/types';
+import { PaneId, SurfaceId, WorkspaceId, SurfaceType, engineOf, type BrowserEngine, type WorkspaceLayout, type WorktreeMetadata } from '../shared/types';
 import { promptSummary, type PromptEntry, type PromptSource } from './store/prompt-slice';
 import { v4 as uuid } from 'uuid';
 import { buildManifestTree, describeWorkspaceTree, type ManifestWorkspaceSpec } from './store/manifest-tree';
@@ -90,25 +90,41 @@ export function initPipeBridge(): void {
 
   // ─── Workspace ──────────────────────────────────────────────────────────────
 
-  w.__wmux_createWorkspace = (params?: {
+  w.__wmux_createWorkspace = async (params?: {
     title?: string; shell?: string; cwd?: string; panes?: number; layout?: string;
+    worktree?: string; base?: string;
   }) => {
     const store = useStore.getState();
-    // `--panes` / `--layout` (issue #212) build a tree HERE rather than being
-    // passed through to createWorkspace, because a caller-supplied splitTree is
-    // exactly what createWorkspace already accepts — and going through
-    // buildWorkspaceTree is what clamps a hostile `panes: 5000` arriving over
-    // the pipe to something that will not spawn five thousand shells.
-    //
-    // Only when one of them was given: omitting both must keep the caller on
-    // the configured default, which is the whole point of #212.
+    let worktreeMeta: WorktreeMetadata | undefined;
+    let targetCwd = params?.cwd;
+
+    if (params?.worktree) {
+      const activeWs = store.workspaces.find((ws) => ws.id === store.activeWorkspaceId);
+      const probeDir = params.cwd || activeWs?.cwd || '';
+      const probeRes = await window.wmux?.worktree?.probe(probeDir);
+      if (!probeRes?.repoRoot) {
+        throw new Error(`Directory is not inside a git repository: ${probeDir}`);
+      }
+      const createRes = await window.wmux?.worktree?.create(
+        probeRes.repoRoot,
+        params.worktree,
+        params.base,
+      );
+      if (!createRes?.ok || !createRes.worktree) {
+        throw new Error(createRes?.error || 'Failed to create worktree');
+      }
+      worktreeMeta = createRes.worktree;
+      targetCwd = createRes.worktree.worktreePath;
+    }
+
     const wants = params?.panes !== undefined || params?.layout !== undefined;
     const shape = resolveWireLayout(params, store.workspacePrefs);
     const splitTree = wants ? buildWorkspaceTree(shape.panes, shape.layout) : undefined;
     const id = store.createWorkspace({
-      title: params?.title,
+      title: params?.title ?? worktreeMeta?.branch,
       shell: params?.shell,
-      cwd: params?.cwd,
+      cwd: targetCwd,
+      worktree: worktreeMeta,
       ...(splitTree ? { splitTree } : {}),
     }, bridgeT);
     return { workspaceId: id };

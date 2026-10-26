@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { getAppDataDir } from '../shared/instance';
 import type { BrowserHistory } from '../shared/browser-history';
+import type { WorktreeMetadata } from '../shared/types';
 
 const APPDATA_DIR = getAppDataDir();
 const SESSIONS_DIR = path.join(APPDATA_DIR, 'sessions');
@@ -44,6 +45,9 @@ export interface SessionData {
       explorerWidth?: number;
       explorerExpanded?: Record<string, string[]>;
       explorerShowHidden?: boolean;
+      // Carried in the auto-session so the workspace re-attaches to its worktree
+      // on restart; explicitly omitted from named sessions and snapshots (§5.4).
+      worktree?: WorktreeMetadata;
     }>;
   }>;
 }
@@ -166,6 +170,7 @@ function backupAutoSession(previousVersion: string): void {
         explorerWidth: w.explorerWidth,
         explorerExpanded: w.explorerExpanded,
         explorerShowHidden: w.explorerShowHidden,
+        // worktree is deliberately omitted (§5.4): named sessions are templates, and a template carrying an exclusive live resource is how two workspaces claim one checkout.
       })),
       sidebarWidth: windows[0]?.sidebarWidth ?? 260,
     };
@@ -451,6 +456,7 @@ export function writeSessionSnapshot(data: SessionData, at: number = Date.now())
         explorerWidth: w.explorerWidth,
         explorerExpanded: w.explorerExpanded,
         explorerShowHidden: w.explorerShowHidden,
+        // worktree is deliberately omitted (§5.4): snapshots are restore points / templates, which must not carry exclusive worktrees.
       })),
       sidebarWidth: windows[0]?.sidebarWidth ?? 260,
     };

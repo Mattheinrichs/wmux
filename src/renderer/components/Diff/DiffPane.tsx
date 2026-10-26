@@ -39,9 +39,10 @@ function isSurfaceVisible(surfaceId: string): boolean {
 interface DiffPaneProps {
   surfaceId: string;
   cwd?: string;
+  baseRef?: string;
 }
 
-export default function DiffPane({ surfaceId, cwd }: DiffPaneProps) {
+export default function DiffPane({ surfaceId, cwd, baseRef }: DiffPaneProps) {
   const t = useT();
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -74,7 +75,7 @@ export default function DiffPane({ surfaceId, cwd }: DiffPaneProps) {
 
   const loadFiles = useCallback(async () => {
     try {
-      const result = await window.wmux?.diff?.getFiles(cwd || '');
+      const result = await window.wmux?.diff?.getFiles(cwd || '', baseRef);
       if (result?.files) {
         const newFiles = result.files as ChangedFile[];
         const newKey = newFiles.map(f => `${f.path}|${f.status}|${f.additions}|${f.deletions}`).join('\n');
@@ -93,11 +94,11 @@ export default function DiffPane({ surfaceId, cwd }: DiffPaneProps) {
       setLoadingIfChanged(false);
     }
     return [];
-  }, [cwd, setErrorIfChanged, setLoadingIfChanged]);
+  }, [cwd, baseRef, setErrorIfChanged, setLoadingIfChanged]);
 
   const loadDiff = useCallback(async (file: string) => {
     try {
-      const result = await window.wmux?.diff?.getFileDiff(cwd || '', file);
+      const result = await window.wmux?.diff?.getFileDiff(cwd || '', file, baseRef);
       if (result?.diff !== undefined) {
         if (result.diff !== lastDiffRawRef.current) {
           lastDiffRawRef.current = result.diff;
@@ -108,7 +109,7 @@ export default function DiffPane({ surfaceId, cwd }: DiffPaneProps) {
       lastDiffRawRef.current = '';
       setHunks([]);
     }
-  }, [cwd]);
+  }, [cwd, baseRef]);
 
   // The poll reads its loaders through refs rather than closing over them.
   // They are stable today, but this effect must not be restartable by a

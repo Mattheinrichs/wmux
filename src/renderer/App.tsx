@@ -28,6 +28,7 @@ import { useBlockedAlert } from './hooks/useBlockedAlert';
 import type { AgentRosterEntry } from './store/agent-rollup';
 import ShortcutCheatSheet from './components/CheatSheet/ShortcutCheatSheet';
 import ConfirmCloseDialog from './components/ConfirmCloseDialog';
+import ConfirmWorktreeCloseDialog from './components/ConfirmWorktreeCloseDialog';
 import SaveLayoutDialog from './components/SaveLayoutDialog';
 import ConfirmCloseSurfaceDialog from './components/ConfirmCloseSurfaceDialog';
 import BrowserPane from './components/Browser/BrowserPane';
@@ -1198,6 +1199,7 @@ export default function App() {
             explorerWidth: ws.explorerWidth,
             explorerExpanded: ws.explorerExpanded,
             explorerShowHidden: ws.explorerShowHidden,
+            worktree: ws.worktree,
           })),
         }],
       };
@@ -1378,6 +1380,7 @@ export default function App() {
         explorerWidth: ws.explorerWidth,
         explorerExpanded: ws.explorerExpanded,
         explorerShowHidden: ws.explorerShowHidden,
+        // worktree is deliberately omitted (§5.4): named sessions are reusable templates; saving a live checkout into a template would cause two workspaces to claim the same directory.
       })),
       sidebarWidth: sidebarWidthRef.current,
       terminalPrefs: { ...state.terminalPrefs },
@@ -2001,6 +2004,7 @@ export default function App() {
       {cheatSheetOpen && <ShortcutCheatSheet onClose={closeCheatSheet} />}
 
       <ConfirmCloseDialog />
+      <ConfirmWorktreeCloseDialog />
       <ConfirmCloseSurfaceDialog />
       <SaveLayoutDialog />
 

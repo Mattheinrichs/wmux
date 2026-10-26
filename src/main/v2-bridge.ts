@@ -5,6 +5,7 @@
  * expression and response shape) is preserved verbatim per method.
  */
 import { BrowserWindow } from 'electron';
+import { isValidBranchName } from './git-worktree';
 
 type Respond = (result: any) => void;
 type RespondError = (code: number, message: string) => void;
@@ -114,6 +115,18 @@ const MAX_LAYOUT_AGENT_CELLS = 16;
  * is only checked for being a finite number: clamping to [0.2, 0.8] belongs to
  * `buildAgentLayout`, so an out-of-range ratio is not an error.
  */
+export function validateWorkspaceCreateParams(params: unknown): string | null {
+  if (params && typeof params === 'object') {
+    const p = params as Record<string, unknown>;
+    if (p.worktree !== undefined) {
+      if (typeof p.worktree !== 'string' || !isValidBranchName(p.worktree)) {
+        return `Invalid worktree branch name: ${JSON.stringify(p.worktree)}`;
+      }
+    }
+  }
+  return null;
+}
+
 export function validateLayoutAgentsParams(params: unknown): string | null {
   if (typeof params !== 'object' || params === null || Array.isArray(params)) {
     return 'layout.agents params must be an object';
@@ -161,6 +174,7 @@ const SPECS: Record<string, BridgeSpec> = {
     requireResult: 'Could not open the link',
   },
   'workspace.create': {
+    validate: validateWorkspaceCreateParams,
     js: (p) => `window.__wmux_createWorkspace?.(${S(p || {})})`,
     shape: (r) => r || { ok: true },
   },

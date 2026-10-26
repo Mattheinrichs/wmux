@@ -1100,6 +1100,27 @@ export const en = {
   'settings.remote.pair.loopbackWarn': 'wmux only listens on this computer and no Public URL is set, so this address will not open on a phone as it is. Make it reachable first:',
   'settings.remote.pair.paired': 'Paired: {name}',
   'settings.remote.pair.close': 'Close',
+  // Git worktree workspaces (issue #7)
+  'sidebar.newWorktreeWorkspace': 'New worktree workspace…',
+  'worktreeModal.title': 'New worktree workspace',
+  'worktreeModal.branchLabel': 'Branch name',
+  'worktreeModal.branchPlaceholder': 'feature/my-change',
+  'worktreeModal.baseLabel': 'Base branch or commit',
+  'worktreeModal.basePlaceholder': 'HEAD',
+  'worktreeModal.creating': 'Creating worktree…',
+  'worktreeModal.create': 'Create workspace',
+  'worktreeModal.cancel': 'Cancel',
+  'worktreeModal.notRepo': 'Current folder is not a Git repository',
+  'worktreeModal.error.branchExists': 'A branch with this name already exists',
+  'worktreeModal.error.branchInUse': 'This branch is already checked out in another worktree',
+  'worktreeModal.error.invalidBranch': 'Invalid branch name',
+  'worktreeModal.error.notRepo': 'Not a Git repository',
+  'worktreeModal.error.generic': 'Failed to create worktree: {error}',
+  'worktreeClose.title': 'Close worktree workspace',
+  'worktreeClose.message': "This workspace is backed by git worktree '{branch}'.",
+  'worktreeClose.keep': 'Keep branch',
+  'worktreeClose.discard': 'Discard',
+  'worktreeClose.cancel': 'Cancel',
 } as const;
 
 /** Every key the UI may ask for — derived from English, the source of truth. */

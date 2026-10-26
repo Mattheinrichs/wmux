@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { SessionData } from '../../src/main/session-persistence';
+import type { WorktreeMetadata } from '../../src/shared/types';
 
 // Use a temp directory for tests
 const TEST_DIR = path.join(os.tmpdir(), 'wmux-test-sessions-' + process.pid);
@@ -451,5 +452,120 @@ describe('explorer panel state persistence', () => {
 
     const name = mod.listNamedSessions().map(s => s.name).find((n) => n.startsWith('Auto-backup'))!;
     expect(mod.loadNamedSession(name)!.workspaces[0].titleIsDefault).toBe(true);
+  });
+});
+
+describe('worktree metadata persistence (§5.4)', () => {
+  const APPDATA_OVERRIDE = path.join(os.tmpdir(), 'wmux-worktree-session-test-' + process.pid);
+  let mod: typeof import('../../src/main/session-persistence');
+  let savedAppData: string | undefined;
+  const leaf = { type: 'leaf', paneId: 'pane-1', surfaces: [], activeSurfaceIndex: 0 };
+
+  const sampleWorktree: WorktreeMetadata = {
+    repoRoot: 'C:\\projects\\my-repo',
+    branch: 'feat/test-worktree',
+    baseBranch: 'main',
+    baseSha: '0123456789abcdef0123456789abcdef01234567',
+    worktreePath: 'C:\\Users\\user\\.wmux\\wt\\my-repo\\feat-test-worktree-abc123',
+  };
+
+  beforeEach(async () => {
+    savedAppData = process.env.APPDATA;
+    process.env.APPDATA = APPDATA_OVERRIDE;
+    delete process.env.WMUX_INSTANCE;
+    vi.resetModules();
+    mod = await import('../../src/main/session-persistence');
+    mod.ensureDirectories();
+  });
+
+  afterEach(() => {
+    if (savedAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = savedAppData;
+    fs.rmSync(APPDATA_OVERRIDE, { recursive: true, force: true });
+  });
+
+  it('round-trips worktree metadata in saveSession / loadSession', () => {
+    const data: SessionData = {
+      version: 1,
+      windows: [{
+        bounds: { x: 0, y: 0, width: 1200, height: 800 },
+        sidebarWidth: 260,
+        activeWorkspaceId: 'ws-1',
+        workspaces: [{
+          id: 'ws-1',
+          title: 'wt-workspace',
+          pinned: false,
+          shell: 'pwsh',
+          cwd: sampleWorktree.worktreePath,
+          splitTree: leaf,
+          worktree: sampleWorktree,
+        }],
+      }],
+    };
+    mod.saveSession(data);
+    const loaded = mod.loadSession();
+    expect(loaded).not.toBeNull();
+    const ws = loaded!.windows[0].workspaces[0];
+    expect(ws.worktree).toEqual(sampleWorktree);
+  });
+
+  it('strips worktree metadata in backupAutoSession across version changes', () => {
+    mod.handleVersionChange('1.0.0');
+    const data: SessionData = {
+      version: 1,
+      windows: [{
+        bounds: { x: 0, y: 0, width: 1200, height: 800 },
+        sidebarWidth: 260,
+        activeWorkspaceId: 'ws-1',
+        workspaces: [{
+          id: 'ws-1',
+          title: 'wt-workspace',
+          pinned: false,
+          shell: 'pwsh',
+          cwd: sampleWorktree.worktreePath,
+          splitTree: leaf,
+          worktree: sampleWorktree,
+        }],
+      }],
+    };
+    mod.saveSession(data);
+
+    mod.handleVersionChange('1.0.1');
+
+    const name = mod.listNamedSessions().map(s => s.name).find((n) => n.startsWith('Auto-backup'))!;
+    expect(name).toBeDefined();
+    const backup = mod.loadNamedSession(name)!;
+    expect(backup).not.toBeNull();
+    expect(backup.workspaces[0].title).toBe('wt-workspace');
+    expect((backup.workspaces[0] as any).worktree).toBeUndefined();
+  });
+
+  it('strips worktree metadata in writeSessionSnapshot', () => {
+    const data: SessionData = {
+      version: 1,
+      windows: [{
+        bounds: { x: 0, y: 0, width: 1200, height: 800 },
+        sidebarWidth: 260,
+        activeWorkspaceId: 'ws-1',
+        workspaces: [{
+          id: 'ws-1',
+          title: 'wt-workspace',
+          pinned: false,
+          shell: 'pwsh',
+          cwd: sampleWorktree.worktreePath,
+          splitTree: leaf,
+          worktree: sampleWorktree,
+        }],
+      }],
+    };
+
+    const stamp = 1700000000000;
+    const name = mod.writeSessionSnapshot(data, stamp);
+    expect(name).not.toBeNull();
+
+    const snapshot = mod.loadNamedSession(name!)!;
+    expect(snapshot).not.toBeNull();
+    expect(snapshot.workspaces[0].title).toBe('wt-workspace');
+    expect((snapshot.workspaces[0] as any).worktree).toBeUndefined();
   });
 });

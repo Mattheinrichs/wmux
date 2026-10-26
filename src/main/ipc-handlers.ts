@@ -49,6 +49,7 @@ import { getRemoteConsole } from './remote-console';
 import type { RemoteConsoleRuntime } from './remote-console/contract';
 import type { RemoteModesResult, RemoteSnapshotResult } from '../shared/remote-console-config';
 import { getChangedFiles, getFileDiff, getChangedFilesWithBaseline } from './diff-provider';
+import { createWorktree, removeWorktree, probeRepo, deleteBranch } from './git-worktree';
 import { handleGitView } from './git-view';
 import type { GitViewRequest } from '../shared/git-view';
 import {
@@ -1252,15 +1253,17 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
 
   // Diff viewer handlers
   // Fallback: prefer process.cwd() (often the project dir) over USERPROFILE (never a git repo)
-  ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string) => {
+  ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const files = await getChangedFiles(resolvedCwd);
+    const ref = typeof baseRef === 'string' && baseRef.trim() ? baseRef.trim() : undefined;
+    const files = await getChangedFiles(resolvedCwd, ref);
     return { files };
   });
 
-  ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string) => {
+  ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const diff = await getFileDiff(resolvedCwd, file);
+    const ref = typeof baseRef === 'string' && baseRef.trim() ? baseRef.trim() : undefined;
+    const diff = await getFileDiff(resolvedCwd, file, ref);
     return { diff };
   });
 
@@ -1551,6 +1554,68 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
       const root = explorerRootFor(surfaceId, event.sender);
       if ('error' in root && root.code !== 'no_root') return root;
       return resolveTerminalFileLink('error' in root ? null : root.realRoot, text);
+    },
+  );
+
+  // Git worktree workspaces (#7)
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_CREATE,
+    async (_event, repoDir: unknown, branch: unknown, base: unknown) => {
+      if (
+        typeof repoDir !== 'string' ||
+        typeof branch !== 'string' ||
+        (base !== undefined && typeof base !== 'string')
+      ) {
+        return { ok: false, error: 'invalid_argument', message: 'Invalid argument types' };
+      }
+      try {
+        return await createWorktree({ repoRoot: repoDir, branch, base });
+      } catch (err: any) {
+        return { ok: false, error: 'spawn_failed', message: (err as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_REMOVE,
+    async (_event, worktreePath: unknown) => {
+      if (typeof worktreePath !== 'string') {
+        console.warn('[worktree] remove failed: invalid_argument');
+        return 'refused_not_wmux';
+      }
+      try {
+        const outcome = await removeWorktree(worktreePath);
+        if (outcome !== 'removed') {
+          console.warn(`[worktree] remove failed: ${outcome}`);
+        }
+        return outcome;
+      } catch {
+        return 'left_behind';
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_PROBE,
+    async (_event, dir: unknown) => {
+      if (typeof dir !== 'string') {
+        return null;
+      }
+      try {
+        return await probeRepo(dir);
+      } catch {
+        return null;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORKTREE_DELETE_BRANCH,
+    async (_event, repoRoot: unknown, branch: unknown) => {
+      if (typeof repoRoot !== 'string' || typeof branch !== 'string') {
+        return { ok: false, error: 'invalid arguments' };
+      }
+      return deleteBranch(repoRoot, branch);
     },
   );
 
