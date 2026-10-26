@@ -49,7 +49,8 @@ import { getRemoteConsole } from './remote-console';
 import type { RemoteConsoleRuntime } from './remote-console/contract';
 import type { RemoteModesResult, RemoteSnapshotResult } from '../shared/remote-console-config';
 import { getChangedFiles, getFileDiff, getChangedFilesWithBaseline } from './diff-provider';
-import { handleGitView } from './git-view';
+import { createWorktree, removeWorktree, probeRepo, inspectWorktree } from './git-worktree';
+import { handleGitView, isSafeRev } from './git-view';
 import type { GitViewRequest } from '../shared/git-view';
 import {
   readMarkdownFile,
@@ -1268,15 +1269,21 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
 
   // Diff viewer handlers
   // Fallback: prefer process.cwd() (often the project dir) over USERPROFILE (never a git repo)
-  ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string) => {
+  // `baseRef` is a worktree workspace's base commit (#366). It lands in git's
+  // argv, so anything that is not one safe revision is dropped, not passed.
+  const diffBaseRef = (baseRef: unknown): string | undefined =>
+    isSafeRev(baseRef) ? baseRef : undefined;
+  ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const files = await getChangedFiles(resolvedCwd);
+    const ref = diffBaseRef(baseRef);
+    const files = await getChangedFiles(resolvedCwd, ref);
     return { files };
   });
 
-  ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string) => {
+  ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const diff = await getFileDiff(resolvedCwd, file);
+    const ref = diffBaseRef(baseRef);
+    const diff = await getFileDiff(resolvedCwd, file, ref);
     return { diff };
   });
 
@@ -1567,6 +1574,64 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
       const root = explorerRootFor(surfaceId, event.sender);
       if ('error' in root && root.code !== 'no_root') return root;
       return resolveTerminalFileLink('error' in root ? null : root.realRoot, text);
+    },
+  );
+
+  // Git worktree workspaces (#366). Removal takes a PATH and a mode, nothing
+  // else: main reads the repository and branch from its own registry, so the
+  // renderer cannot name a branch to delete or a directory to remove.
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_CREATE,
+    async (_event, repoDir: unknown, branch: unknown, base: unknown) => {
+      if (
+        typeof repoDir !== 'string' ||
+        typeof branch !== 'string' ||
+        (base !== undefined && typeof base !== 'string')
+      ) {
+        return { ok: false, code: 'invalid_argument', error: 'Invalid argument types' };
+      }
+      try {
+        return await createWorktree({ repoRoot: repoDir, branch, base });
+      } catch (err) {
+        return { ok: false, code: 'git_failed', error: (err as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.GIT_WORKTREE_INSPECT, async (_event, worktreePath: unknown) => {
+    try {
+      return await inspectWorktree(worktreePath);
+    } catch (err) {
+      return { outcome: 'error', message: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_REMOVE,
+    async (_event, worktreePath: unknown, mode: unknown) => {
+      if (mode !== 'keep' && mode !== 'discard') {
+        return { outcome: 'error', message: 'invalid mode' };
+      }
+      try {
+        const result = await removeWorktree(worktreePath, { mode });
+        // Outcome only — never the path (#174).
+        if (result.outcome !== 'removed') console.warn(`[worktree] ${mode} close: ${result.outcome}`);
+        return result;
+      } catch (err) {
+        return { outcome: 'error', message: (err as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GIT_WORKTREE_PROBE,
+    async (_event, dir: unknown) => {
+      if (typeof dir !== 'string') return null;
+      try {
+        return await probeRepo(dir);
+      } catch {
+        return null;
+      }
     },
   );
 

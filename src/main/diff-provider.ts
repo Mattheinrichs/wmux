@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isSafeRev } from './git-view';
 
 const execFileAsync = promisify(execFile);
 
@@ -464,7 +465,57 @@ async function countUntrackedAdditions(cwd: string, rel: string): Promise<number
   return lines.length;
 }
 
-async function getGitChangedFiles(cwd: string): Promise<ChangedFile[]> {
+// A worktree workspace's base commit (#366) lands in argv: one safe revision
+// (git-view.ts's rule — never an option, never a range) or nothing.
+function isValidBaseRef(ref: string): boolean {
+  return isSafeRev(ref);
+}
+
+const NAME_STATUS: Record<string, ChangedFile['status']> = { A: 'added', D: 'deleted', R: 'renamed' };
+
+/** `git diff <base> --name-status` joined with its `--numstat`. */
+function parseNameStatus(
+  nameStatusOut: string,
+  stats: Map<string, { additions: number; deletions: number }>,
+): ChangedFile[] {
+  const out: ChangedFile[] = [];
+  for (const line of nameStatusOut.trim().split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 2) continue;
+    const filePath = parts[parts.length >= 3 ? 2 : 1].trim().replace(/^"(.*)"$/, '$1');
+    const stat = stats.get(filePath);
+    out.push({
+      path: filePath,
+      status: NAME_STATUS[parts[0].trim()[0]] ?? 'modified',
+      additions: stat?.additions ?? 0,
+      deletions: stat?.deletions ?? 0,
+    });
+  }
+  return out;
+}
+
+/** Everything a worktree workspace changed since its base commit (#366):
+ *  committed and uncommitted work against `base`, plus untracked files. */
+async function getGitChangedFilesSinceBase(cwd: string, base: string): Promise<ChangedFile[]> {
+  const [nameStatusOut, numstatOut, statusOut] = await Promise.all([
+    git(cwd, ['diff', base, '--name-status']).catch(() => ''),
+    git(cwd, ['diff', base, '--numstat']).catch(() => ''),
+    git(cwd, ['status', '--porcelain', '-unormal']).catch(() => ''),
+  ]);
+  const out = parseNameStatus(nameStatusOut, parseNumstat(numstatOut));
+  const seen = new Set(out.map((f) => f.path));
+  // Sequential for the same reason as the HEAD path below (#141).
+  for (const e of parsePorcelainStatus(statusOut)) {
+    if (seen.has(e.path) || e.status !== 'added') continue;
+    out.push({ ...e, additions: await countUntrackedAdditions(cwd, e.path), deletions: 0 });
+    seen.add(e.path);
+  }
+  return out;
+}
+
+async function getGitChangedFiles(cwd: string, baseRef?: string): Promise<ChangedFile[]> {
+  if (baseRef && isValidBaseRef(baseRef)) return getGitChangedFilesSinceBase(cwd, baseRef);
+
   const statusOut = await git(cwd, ['status', '--porcelain', '-unormal']).catch(() => '');
   if (!statusOut.trim()) return [];
 
@@ -518,7 +569,15 @@ export function untrackedFileDiff(cwd: string, file: string): string {
   }
 }
 
-async function getGitFileDiff(cwd: string, file: string): Promise<string> {
+async function getGitFileDiff(cwd: string, file: string, baseRef?: string): Promise<string> {
+  const validBase = baseRef && isValidBaseRef(baseRef) ? baseRef : undefined;
+  if (validBase) {
+    const out = await git(cwd, ['diff', validBase, '--', file]).catch(() => '');
+    if (out.trim()) return out;
+    const status = await git(cwd, ['status', '--porcelain', '--', file]).catch(() => '');
+    return status.includes('??') ? untrackedFileDiff(cwd, file) : '';
+  }
+
   for (const args of [['diff', 'HEAD'], ['diff'], ['diff', '--cached']]) {
     const out = await git(cwd, [...args, '--', file]).catch(() => '');
     if (out.trim()) return out;
@@ -548,11 +607,12 @@ function coalesce<T>(inFlight: Map<string, Promise<T>>, key: string, work: () =>
 const changedFilesInFlight = new Map<string, Promise<ChangedFile[]>>();
 const fileDiffsInFlight = new Map<string, Promise<string>>();
 
-export async function getChangedFiles(cwd: string): Promise<ChangedFile[]> {
+export async function getChangedFiles(cwd: string, baseRef?: string): Promise<ChangedFile[]> {
   if (!cwd) cwd = process.cwd();
-  return coalesce(changedFilesInFlight, cwd, async () => (
+  const key = `${cwd} ${baseRef || ''}`;
+  return coalesce(changedFilesInFlight, key, async () => (
     await isGitRepo(cwd)
-      ? getGitChangedFiles(cwd)
+      ? getGitChangedFiles(cwd, baseRef)
       // No git — use snapshot system, which coalesces on its own key too so a
       // scan shared with a direct caller is still only walked once.
       : getSnapshotChangedFilesCoalesced(cwd)
@@ -583,11 +643,12 @@ export async function getChangedFilesWithBaseline(
   return { files: await getChangedFiles(cwd), baseline };
 }
 
-export async function getFileDiff(cwd: string, file: string): Promise<string> {
+export async function getFileDiff(cwd: string, file: string, baseRef?: string): Promise<string> {
   if (!file) return '';
   if (!cwd) cwd = process.cwd();
-  return coalesce(fileDiffsInFlight, `${cwd} ${file}`, async () => (
-    await isGitRepo(cwd) ? getGitFileDiff(cwd, file) : getSnapshotFileDiff(cwd, file)
+  const key = `${cwd} ${file} ${baseRef || ''}`;
+  return coalesce(fileDiffsInFlight, key, async () => (
+    await isGitRepo(cwd) ? getGitFileDiff(cwd, file, baseRef) : getSnapshotFileDiff(cwd, file)
   ));
 }
 

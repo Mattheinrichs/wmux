@@ -26,6 +26,19 @@ export function getAppDataDir(): string {
 }
 
 /**
+ * Non-roaming AppData directory (LocalAppData).
+ * Carries the same suffix as the pipe and APPDATA dir.
+ *
+ * The suffix is not cosmetic (D5): a dev build and a production build each
+ * keep their own worktree root and their own record of what they created, so
+ * neither ever treats the other's checkouts as its own.
+ */
+export function getLocalAppDataDir(): string {
+  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(base, `wmux${suffix()}`);
+}
+
+/**
  * Windows taskbar identity. Carries the same suffix as the pipe and the
  * APPDATA dir, and for the same reason.
  *

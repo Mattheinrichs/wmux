@@ -5,6 +5,8 @@
  * expression and response shape) is preserved verbatim per method.
  */
 import { BrowserWindow } from 'electron';
+import { isValidBaseRef, isValidBranchName } from './git-worktree';
+import { getExplorerRoot } from './explorer-roots';
 
 type Respond = (result: any) => void;
 type RespondError = (code: number, message: string) => void;
@@ -29,6 +31,9 @@ interface BridgeSpec {
   callerScoped?: boolean;
   // Reject bad params before any window is looked up. Returns the -32602 message.
   validate?: (params: any) => string | null;
+  // Fill in what only main knows, after validation and before the renderer
+  // sees the params. Returns the params to send, or `{ error }` for -32602.
+  prepare?: (params: any) => any;
 }
 
 /** Which window (by `BrowserWindow.id`) and workspace a call should be answered by. */
@@ -105,6 +110,42 @@ export function linkOpenJs(url: unknown): string {
   return `window.__wmux_openLink?.(${S(typeof url === 'string' ? url : '')})`;
 }
 
+/**
+ * -32602 message for `workspace.create`'s worktree params (#366), or null.
+ * The branch and the base both reach git's argv, so neither may look like an
+ * option; git's own `check-ref-format` runs again when the worktree is made.
+ */
+export function validateWorkspaceCreateParams(params: unknown): string | null {
+  if (!params || typeof params !== 'object') return null;
+  const p = params as Record<string, unknown>;
+  if (p.worktree === undefined) {
+    return p.base === undefined ? null : '--base is only valid with --worktree';
+  }
+  if (!isValidBranchName(p.worktree)) {
+    return `Invalid worktree branch name: ${JSON.stringify(p.worktree)}`;
+  }
+  if (!isValidBaseRef(p.base)) return `Invalid base ref: ${JSON.stringify(p.base)}`;
+  if (p.cwd !== undefined && typeof p.cwd !== 'string') return 'cwd must be a string';
+  return null;
+}
+
+/**
+ * The repository a pipe-created worktree branches from is the CALLER's
+ * (#246): an explicit `cwd`, else the folder the calling surface last
+ * reported. Never the focused workspace — that is somebody else's repo as
+ * often as not, and a worktree made in the wrong one is a branch the user did
+ * not ask for. With neither, the call is refused rather than guessed.
+ */
+export function prepareWorkspaceCreateParams(
+  params: any,
+  rootOf: (surfaceId: string) => { realRoot: string } | null = getExplorerRoot,
+): any {
+  if (!params || params.worktree === undefined || params.cwd) return params;
+  const root = typeof params.caller === 'string' && params.caller ? rootOf(params.caller) : null;
+  if (!root) return { error: 'Cannot tell which repository to branch from: pass --cwd <dir>' };
+  return { ...params, cwd: root.realRoot };
+}
+
 // Same value as MAX_AGENT_CELLS in renderer/store/split-utils.ts; main's tsconfig does not include the renderer.
 const MAX_LAYOUT_AGENT_CELLS = 16;
 
@@ -161,6 +202,8 @@ const SPECS: Record<string, BridgeSpec> = {
     requireResult: 'Could not open the link',
   },
   'workspace.create': {
+    validate: validateWorkspaceCreateParams,
+    prepare: prepareWorkspaceCreateParams,
     js: (p) => `window.__wmux_createWorkspace?.(${S(p || {})})`,
     shape: (r) => r || { ok: true },
   },
@@ -267,6 +310,10 @@ function runBridge(spec: BridgeSpec, params: any, respond: Respond, respondError
     try {
       const invalid = spec.validate?.(params);
       if (invalid) { respondError(-32602, invalid); return; }
+      if (spec.prepare) {
+        params = spec.prepare(params);
+        if (typeof params?.error === 'string') { respondError(-32602, params.error); return; }
+      }
       const target = await targetForCaller(params?.caller);
       if (!target) {
         if (spec.emptyOnNoWindow !== undefined) { respond(spec.emptyOnNoWindow); return; }

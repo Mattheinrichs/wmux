@@ -62,6 +62,26 @@ function sessionDetailText(session: { working: boolean; blocked: boolean; questi
   return session.tool ? getToolLabel(session.tool, t) : t('workspaceRow.sessionRunning', 'Running…');
 }
 
+/** The row's `--row-accent` custom property, when the user picked a colour. */
+function rowAccentStyle(customColor: string | undefined): React.CSSProperties {
+  const style: React.CSSProperties = {};
+  if (customColor) (style as Record<string, string>)['--row-accent'] = customColor;
+  return style;
+}
+
+/** `[WT]` on a workspace that is a wmux-created git worktree (#366). */
+function WorktreeBadge({ worktree }: { worktree?: WorkspaceInfo['worktree'] }) {
+  const t = useT();
+  if (!worktree) return null;
+  const title = t('worktree.badgeTitle', 'Worktree: {branch} (base: {base})')
+    .split('{branch}').join(worktree.branch)
+    .split('{base}').join(worktree.baseBranch);
+  return (
+    <span className="workspace-row__badge workspace-row__badge--worktree" title={title}>
+      [WT]
+    </span>
+  );
+}
 
 interface WorkspaceRowProps {
   workspace: WorkspaceInfo;
@@ -145,10 +165,7 @@ export default function WorkspaceRow({
   // it, so CSS decides the treatment (rail / tint / fill) while the colour
   // still comes from the workspace. issue #10 (customColor must win) and
   // issue #80 (15% tint, not 5%) both survive; see sidebar.css.
-  const rowStyle: React.CSSProperties = {};
-  if (workspace.customColor) {
-    (rowStyle as Record<string, string>)['--row-accent'] = workspace.customColor;
-  }
+  const rowStyle = rowAccentStyle(workspace.customColor);
 
   // Tick counter — forces re-evaluation of time-based memos every 2 seconds.
   // Without this, useMemo caches stale Date.now() results because the deps
@@ -420,6 +437,9 @@ export default function WorkspaceRow({
 
   const rowBadges = (
     <>
+      <WorktreeBadge worktree={workspace.worktree} />
+
+
       {/* Work odometer: total tool calls this workspace's sessions have made.
           hookActivity[].toolCount is live, monotonic and deliberately never
           garbage-collected — and was rendered nowhere in the app until now.

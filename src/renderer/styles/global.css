@@ -288,3 +288,45 @@ html.wmux-transparent #root {
 .confirm-dialog__btn--primary:hover {
   background: color-mix(in srgb, var(--ui-accent) 35%, transparent);
 }
+
+/* Worktree workspace creation modal (#366). Reuses .confirm-dialog frame. */
+.worktree-modal__input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 320px;
+  margin: 0 0 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  background: var(--ui-bg-0);
+  color: var(--ui-text-primary);
+  font-size: 13px;
+}
+
+.worktree-modal__input:focus {
+  outline: 1px solid var(--ui-accent);
+  outline-offset: 0;
+}
+
+.worktree-modal__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.worktree-modal__error {
+  color: #b3261e;
+  font-size: 12px;
+  margin: -8px 0 12px;
+}
+
+.worktree-modal__warning {
+  color: #b3261e;
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+
+/* Worktree close dialog (#366): what Discard destroys, spelled out. */
+.confirm-dialog__message--warning {
+  color: #e5534b;
+}

@@ -1530,3 +1530,23 @@
   background: rgba(var(--ui-overlay-rgb), 0.08);
   color: var(--ui-text-primary);
 }
+
+/* Worktree workspace badge (#7) */
+.workspace-row__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(9.5px * var(--sidebar-text-scale, 1));
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 3px;
+  user-select: none;
+}
+
+.workspace-row__badge--worktree {
+  color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 40%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}

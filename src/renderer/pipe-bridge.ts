@@ -11,7 +11,7 @@ import { toRemoteRosterSource } from './utils/remote-roster';
 import { selectWorkspaceLabels } from './components/SplitPane/use-osc-title';
 import { openLinkFromBridge } from './utils/open-link';
 import { readScreenReport } from './utils/screen-report';
-import { PaneId, SurfaceId, WorkspaceId, SurfaceType, engineOf, type BrowserEngine, type WorkspaceLayout } from '../shared/types';
+import { PaneId, SurfaceId, WorkspaceId, SurfaceType, engineOf, type BrowserEngine, type WorkspaceLayout, type WorktreeMetadata } from '../shared/types';
 import { promptSummary, type PromptEntry, type PromptSource } from './store/prompt-slice';
 import { v4 as uuid } from 'uuid';
 import { buildManifestTree, describeWorkspaceTree, type ManifestWorkspaceSpec } from './store/manifest-tree';
@@ -20,6 +20,9 @@ import { translate, type TranslationKey } from './i18n/core';
 /** Non-hook context (bridges the main process to the store) — reads the current language directly. */
 const bridgeT = (key: TranslationKey, fallback?: string): string =>
   translate(useStore.getState().language, key, fallback);
+
+/** Notices main may ask for by key (`__wmux_paneNoticeKey`). */
+const PANE_NOTICE_KEYS = ['worktree.restoreMissing'] as const;
 
 const WIRE_LAYOUTS: readonly WorkspaceLayout[] = ['grid', 'columns', 'rows', 'left', 'down'];
 
@@ -85,15 +88,40 @@ const publicPrompt = (entry: PromptEntry): PublicPrompt => ({
   summary: promptSummary(entry.text),
 });
 
+async function createWorktreeFor(
+  dir: string | undefined,
+  branch: string,
+  base: string | undefined,
+): Promise<WorktreeMetadata> {
+  if (!dir) throw new Error('Cannot tell which repository to branch from: pass --cwd <dir>');
+  const probe = await window.wmux?.worktree?.probe(dir);
+  if (!probe?.repoRoot) throw new Error(`Directory is not inside a git repository: ${dir}`);
+  const created = await window.wmux?.worktree?.create(probe.repoRoot, branch, base);
+  if (!created?.ok || !created.worktree) throw new Error(created?.error || 'Failed to create worktree');
+  return created.worktree as WorktreeMetadata;
+}
+
 export function initPipeBridge(): void {
   const w = window as any;
 
   // ─── Workspace ──────────────────────────────────────────────────────────────
 
-  w.__wmux_createWorkspace = (params?: {
+  w.__wmux_createWorkspace = async (params?: {
     title?: string; shell?: string; cwd?: string; panes?: number; layout?: string;
+    worktree?: string; base?: string;
   }) => {
     const store = useStore.getState();
+    let worktreeMeta: WorktreeMetadata | undefined;
+    let targetCwd = params?.cwd;
+
+    // `--worktree` (#366): the repository is the CALLER's directory, which main
+    // has already put in `cwd` (an explicit --cwd, or the calling surface's
+    // reported folder). Never the focused workspace's — that guess is #246.
+    if (params?.worktree) {
+      worktreeMeta = await createWorktreeFor(params.cwd, params.worktree, params.base);
+      targetCwd = worktreeMeta.worktreePath;
+    }
+
     // `--panes` / `--layout` (issue #212) build a tree HERE rather than being
     // passed through to createWorkspace, because a caller-supplied splitTree is
     // exactly what createWorkspace already accepts — and going through
@@ -106,9 +134,10 @@ export function initPipeBridge(): void {
     const shape = resolveWireLayout(params, store.workspacePrefs);
     const splitTree = wants ? buildWorkspaceTree(shape.panes, shape.layout) : undefined;
     const id = store.createWorkspace({
-      title: params?.title,
+      title: params?.title ?? worktreeMeta?.branch,
       shell: params?.shell,
-      cwd: params?.cwd,
+      cwd: targetCwd,
+      worktree: worktreeMeta,
       ...(splitTree ? { splitTree } : {}),
     }, bridgeT);
     return { workspaceId: id };
@@ -576,6 +605,16 @@ export function initPipeBridge(): void {
     if (!w.__wmux_locateSurface(surfaceId)) return false;
     showPaneNotice(surfaceId, String(text).slice(0, 500));
     return true;
+  };
+
+  /**
+   * The same notice, named by i18n KEY so main never writes English into a
+   * pane (#366: a restored worktree workspace whose folder is gone). Only the
+   * keys listed here are accepted; anything else is refused, not echoed.
+   */
+  w.__wmux_paneNoticeKey = (surfaceId: string, key: string) => {
+    if (!(PANE_NOTICE_KEYS as readonly string[]).includes(key)) return false;
+    return w.__wmux_paneNotice(surfaceId, bridgeT(key as TranslationKey));
   };
 
   /** The caller's workspace as `wmux workspace save` writes it; null if not here. */

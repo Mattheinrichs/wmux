@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import * as os from 'os';
-import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult, type KeepAwakeMode, type KeepAwakeState } from '../shared/types';
+import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult,
+  type KeepAwakeMode, type KeepAwakeState,
+  type WorktreeCloseMode, type WorktreeInspectResult, type WorktreeRemoveResult,
+} from '../shared/types';
 import type { BrowserHistory } from '../shared/browser-history';
 import type {
   RemoteConsoleBridge,
@@ -435,8 +438,8 @@ contextBridge.exposeInMainWorld('wmux', {
       ipcRenderer.invoke(IPC_CHANNELS.CODE_WRITE_FILE, surfaceId, relPath, content, expectedMtimeMs),
   },
   diff: {
-    getFiles: (cwd: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_FILES, cwd),
-    getFileDiff: (cwd: string, file: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_DIFF, cwd, file),
+    getFiles: (cwd: string, baseRef?: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_FILES, cwd, baseRef),
+    getFileDiff: (cwd: string, file: string, baseRef?: string) => ipcRenderer.invoke(IPC_CHANNELS.DIFF_GET_DIFF, cwd, file, baseRef),
     onUpdate: (callback: (data: { file?: string }) => void) => {
       const handler = (_event: any, data: any) => callback(data);
       ipcRenderer.on(IPC_CHANNELS.DIFF_UPDATE, handler);
@@ -520,5 +523,18 @@ contextBridge.exposeInMainWorld('wmux', {
     closeSelf: () => ipcRenderer.send(IPC_CHANNELS.WINDOW_CLOSE_SELF),
     isFrameless: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_FRAMELESS),
     relaunch: () => ipcRenderer.send(IPC_CHANNELS.WINDOW_RELAUNCH),
+  },
+  // Git worktree workspaces (#366). `remove` names a path and a mode and
+  // nothing else: main reads the repository and branch from its own record of
+  // what it created, so there is no "delete this branch" call to abuse.
+  worktree: {
+    create: (repoDir: string, branch: string, base?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_CREATE, repoDir, branch, base),
+    inspect: (worktreePath: string): Promise<WorktreeInspectResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_INSPECT, worktreePath),
+    remove: (worktreePath: string, mode: WorktreeCloseMode): Promise<WorktreeRemoveResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_REMOVE, worktreePath, mode),
+    probe: (dir: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_PROBE, dir),
   },
 });
