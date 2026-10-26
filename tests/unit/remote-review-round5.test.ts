@@ -225,9 +225,9 @@ describe('phone wording (#254, review round 5)', () => {
   });
 });
 
-describe('CLAUDE.md (#254, review round 5)', () => {
+describe('AGENTS.md (#254, review round 5)', () => {
   it('describes the two-entry build and the shared chunk, and drops the stale bundle size', () => {
-    const md = read('CLAUDE.md');
+    const md = read('AGENTS.md');
     expect(md).not.toContain('already at ~1.8 MB');
     expect(md).toContain('remote-manifest.json (the console server refuses to serve without it)');
     expect(md).toMatch(/separate shared chunk that the desktop window loads too/);

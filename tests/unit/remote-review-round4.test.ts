@@ -196,10 +196,11 @@ describe('Settings (#254)', () => {
     }
   });
 
-  it('CLAUDE.md lists the dismiss-rejected-origin bridge', () => {
-    const doc = read('CLAUDE.md');
+  it('AGENTS.md lists the dismiss-rejected-origin bridge', () => {
+    const doc = read('AGENTS.md');
     expect(doc).toMatch(/remoteConsole:[^\n]*\n[^\n]*dismissRejectedOrigin/);
-    expect(doc).toContain('rename-device/dismiss-rejected-origin');
+    // AGENTS.md no longer copies the channel list; IPC_CHANNELS is its one home.
+    expect(read('src/shared/types.ts')).toContain("'remote-console:dismiss-rejected-origin'");
   });
 });
 
