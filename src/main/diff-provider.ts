@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isSafeRev } from './git-view';
 
 const execFileAsync = promisify(execFile);
 
@@ -464,58 +465,56 @@ async function countUntrackedAdditions(cwd: string, rel: string): Promise<number
   return lines.length;
 }
 
+// A worktree workspace's base commit (#366) lands in argv: one safe revision
+// (git-view.ts's rule — never an option, never a range) or nothing.
 function isValidBaseRef(ref: string): boolean {
-  if (!ref || typeof ref !== 'string') return false;
-  if (ref.startsWith('-') || /\s/.test(ref)) return false;
-  return /^[A-Za-z0-9._/~^@-]+$/.test(ref);
+  return isSafeRev(ref);
+}
+
+const NAME_STATUS: Record<string, ChangedFile['status']> = { A: 'added', D: 'deleted', R: 'renamed' };
+
+/** `git diff <base> --name-status` joined with its `--numstat`. */
+function parseNameStatus(
+  nameStatusOut: string,
+  stats: Map<string, { additions: number; deletions: number }>,
+): ChangedFile[] {
+  const out: ChangedFile[] = [];
+  for (const line of nameStatusOut.trim().split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 2) continue;
+    const filePath = parts[parts.length >= 3 ? 2 : 1].trim().replace(/^"(.*)"$/, '$1');
+    const stat = stats.get(filePath);
+    out.push({
+      path: filePath,
+      status: NAME_STATUS[parts[0].trim()[0]] ?? 'modified',
+      additions: stat?.additions ?? 0,
+      deletions: stat?.deletions ?? 0,
+    });
+  }
+  return out;
+}
+
+/** Everything a worktree workspace changed since its base commit (#366):
+ *  committed and uncommitted work against `base`, plus untracked files. */
+async function getGitChangedFilesSinceBase(cwd: string, base: string): Promise<ChangedFile[]> {
+  const [nameStatusOut, numstatOut, statusOut] = await Promise.all([
+    git(cwd, ['diff', base, '--name-status']).catch(() => ''),
+    git(cwd, ['diff', base, '--numstat']).catch(() => ''),
+    git(cwd, ['status', '--porcelain', '-unormal']).catch(() => ''),
+  ]);
+  const out = parseNameStatus(nameStatusOut, parseNumstat(numstatOut));
+  const seen = new Set(out.map((f) => f.path));
+  // Sequential for the same reason as the HEAD path below (#141).
+  for (const e of parsePorcelainStatus(statusOut)) {
+    if (seen.has(e.path) || e.status !== 'added') continue;
+    out.push({ ...e, additions: await countUntrackedAdditions(cwd, e.path), deletions: 0 });
+    seen.add(e.path);
+  }
+  return out;
 }
 
 async function getGitChangedFiles(cwd: string, baseRef?: string): Promise<ChangedFile[]> {
-  const validBase = baseRef && isValidBaseRef(baseRef) ? baseRef : undefined;
-
-  if (validBase) {
-    const [nameStatusOut, numstatOut, statusOut] = await Promise.all([
-      git(cwd, ['diff', validBase, '--name-status']).catch(() => ''),
-      git(cwd, ['diff', validBase, '--numstat']).catch(() => ''),
-      git(cwd, ['status', '--porcelain', '-unormal']).catch(() => ''),
-    ]);
-
-    const stats = parseNumstat(numstatOut);
-    const out: ChangedFile[] = [];
-    const seenPaths = new Set<string>();
-
-    for (const line of nameStatusOut.trim().split('\n')) {
-      if (!line) continue;
-      const parts = line.split('\t');
-      if (parts.length < 2) continue;
-      const statusCode = parts[0].trim()[0];
-      const filePath = (parts.length >= 3 ? parts[2] : parts[1]).trim().replace(/^"(.*)"$/, '$1');
-      seenPaths.add(filePath);
-
-      let status: ChangedFile['status'] = 'modified';
-      if (statusCode === 'A') status = 'added';
-      else if (statusCode === 'D') status = 'deleted';
-      else if (statusCode === 'R') status = 'renamed';
-
-      const stat = stats.get(filePath);
-      out.push({
-        path: filePath,
-        status,
-        additions: stat ? stat.additions : 0,
-        deletions: stat ? stat.deletions : 0,
-      });
-    }
-
-    const entries = parsePorcelainStatus(statusOut);
-    for (const e of entries) {
-      if (!seenPaths.has(e.path) && e.status === 'added') {
-        const additions = await countUntrackedAdditions(cwd, e.path);
-        out.push({ ...e, additions, deletions: 0 });
-        seenPaths.add(e.path);
-      }
-    }
-    return out;
-  }
+  if (baseRef && isValidBaseRef(baseRef)) return getGitChangedFilesSinceBase(cwd, baseRef);
 
   const statusOut = await git(cwd, ['status', '--porcelain', '-unormal']).catch(() => '');
   if (!statusOut.trim()) return [];
@@ -523,6 +522,18 @@ async function getGitChangedFiles(cwd: string, baseRef?: string): Promise<Change
   const entries = parsePorcelainStatus(statusOut);
   const stats = parseNumstat(await git(cwd, ['diff', 'HEAD', '--numstat']).catch(() => ''));
 
+  // `git diff HEAD --numstat` covers TRACKED files only, so an untracked file
+  // falls through the join and lands on +0/-0 — which the explorer's column
+  // renders identically to a file that did not change. Read those and count
+  // them, matching what the snapshot backend has always reported for an added
+  // file, so the same column means the same thing in a repo and outside one.
+  //
+  // Sequential on purpose. This runs on the poll path in the process that also
+  // relays every keystroke (issue #141), and a Promise.all over a repo with a
+  // few thousand loose untracked files is an EMFILE waiting to happen. The
+  // loop is short in practice because `-unormal` collapses an untracked
+  // DIRECTORY into one `name/` entry: an unignored node_modules arrives here
+  // as a single row that costs one failed read, not as 30 000 rows.
   const out: ChangedFile[] = [];
   for (const e of entries) {
     const stat = stats.get(e.path);
@@ -602,6 +613,8 @@ export async function getChangedFiles(cwd: string, baseRef?: string): Promise<Ch
   return coalesce(changedFilesInFlight, key, async () => (
     await isGitRepo(cwd)
       ? getGitChangedFiles(cwd, baseRef)
+      // No git — use snapshot system, which coalesces on its own key too so a
+      // scan shared with a direct caller is still only walked once.
       : getSnapshotChangedFilesCoalesced(cwd)
   ));
 }

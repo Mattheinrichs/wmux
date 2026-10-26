@@ -21,6 +21,9 @@ import { translate, type TranslationKey } from './i18n/core';
 const bridgeT = (key: TranslationKey, fallback?: string): string =>
   translate(useStore.getState().language, key, fallback);
 
+/** Notices main may ask for by key (`__wmux_paneNoticeKey`). */
+const PANE_NOTICE_KEYS = ['worktree.restoreMissing'] as const;
+
 const WIRE_LAYOUTS: readonly WorkspaceLayout[] = ['grid', 'columns', 'rows', 'left', 'down'];
 
 /**
@@ -85,6 +88,19 @@ const publicPrompt = (entry: PromptEntry): PublicPrompt => ({
   summary: promptSummary(entry.text),
 });
 
+async function createWorktreeFor(
+  dir: string | undefined,
+  branch: string,
+  base: string | undefined,
+): Promise<WorktreeMetadata> {
+  if (!dir) throw new Error('Cannot tell which repository to branch from: pass --cwd <dir>');
+  const probe = await window.wmux?.worktree?.probe(dir);
+  if (!probe?.repoRoot) throw new Error(`Directory is not inside a git repository: ${dir}`);
+  const created = await window.wmux?.worktree?.create(probe.repoRoot, branch, base);
+  if (!created?.ok || !created.worktree) throw new Error(created?.error || 'Failed to create worktree');
+  return created.worktree as WorktreeMetadata;
+}
+
 export function initPipeBridge(): void {
   const w = window as any;
 
@@ -98,25 +114,22 @@ export function initPipeBridge(): void {
     let worktreeMeta: WorktreeMetadata | undefined;
     let targetCwd = params?.cwd;
 
+    // `--worktree` (#366): the repository is the CALLER's directory, which main
+    // has already put in `cwd` (an explicit --cwd, or the calling surface's
+    // reported folder). Never the focused workspace's — that guess is #246.
     if (params?.worktree) {
-      const activeWs = store.workspaces.find((ws) => ws.id === store.activeWorkspaceId);
-      const probeDir = params.cwd || activeWs?.cwd || '';
-      const probeRes = await window.wmux?.worktree?.probe(probeDir);
-      if (!probeRes?.repoRoot) {
-        throw new Error(`Directory is not inside a git repository: ${probeDir}`);
-      }
-      const createRes = await window.wmux?.worktree?.create(
-        probeRes.repoRoot,
-        params.worktree,
-        params.base,
-      );
-      if (!createRes?.ok || !createRes.worktree) {
-        throw new Error(createRes?.error || 'Failed to create worktree');
-      }
-      worktreeMeta = createRes.worktree;
-      targetCwd = createRes.worktree.worktreePath;
+      worktreeMeta = await createWorktreeFor(params.cwd, params.worktree, params.base);
+      targetCwd = worktreeMeta.worktreePath;
     }
 
+    // `--panes` / `--layout` (issue #212) build a tree HERE rather than being
+    // passed through to createWorkspace, because a caller-supplied splitTree is
+    // exactly what createWorkspace already accepts — and going through
+    // buildWorkspaceTree is what clamps a hostile `panes: 5000` arriving over
+    // the pipe to something that will not spawn five thousand shells.
+    //
+    // Only when one of them was given: omitting both must keep the caller on
+    // the configured default, which is the whole point of #212.
     const wants = params?.panes !== undefined || params?.layout !== undefined;
     const shape = resolveWireLayout(params, store.workspacePrefs);
     const splitTree = wants ? buildWorkspaceTree(shape.panes, shape.layout) : undefined;
@@ -592,6 +605,16 @@ export function initPipeBridge(): void {
     if (!w.__wmux_locateSurface(surfaceId)) return false;
     showPaneNotice(surfaceId, String(text).slice(0, 500));
     return true;
+  };
+
+  /**
+   * The same notice, named by i18n KEY so main never writes English into a
+   * pane (#366: a restored worktree workspace whose folder is gone). Only the
+   * keys listed here are accepted; anything else is refused, not echoed.
+   */
+  w.__wmux_paneNoticeKey = (surfaceId: string, key: string) => {
+    if (!(PANE_NOTICE_KEYS as readonly string[]).includes(key)) return false;
+    return w.__wmux_paneNotice(surfaceId, bridgeT(key as TranslationKey));
   };
 
   /** The caller's workspace as `wmux workspace save` writes it; null if not here. */

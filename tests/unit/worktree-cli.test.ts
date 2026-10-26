@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { COMMAND_SPECS } from '../../src/cli/wmux';
-import { validateWorkspaceCreateParams, handleBridgeV2 } from '../../src/main/v2-bridge';
+import { validateWorkspaceCreateParams, prepareWorkspaceCreateParams, handleBridgeV2 } from '../../src/main/v2-bridge';
 import { initPipeBridge } from '../../src/renderer/pipe-bridge';
 import { useStore } from '../../src/renderer/store';
 
@@ -105,6 +105,67 @@ describe('CLI worktree flags and parameter validation', () => {
       expect(ws?.cwd).toBe('C:\\Users\\User\\AppData\\Local\\wmux\\wt\\repo\\feat-cli-wt');
       expect(ws?.worktree?.branch).toBe('feat/cli-wt');
       expect(ws?.title).toBe('feat/cli-wt');
+    });
+
+    it('never falls back to the focused workspace when no directory was resolved (#246)', async () => {
+      useStore.setState({
+        workspaces: [{ id: 'ws-focused', cwd: 'C:\\someone-elses-repo' } as any],
+        activeWorkspaceId: 'ws-focused' as any,
+      });
+      await expect((window as any).__wmux_createWorkspace({ worktree: 'feat/x' }))
+        .rejects.toThrow(/pass --cwd/);
+      expect(mockProbe).not.toHaveBeenCalled();
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('base ref validation', () => {
+    it('refuses a base starting with "-" and other unsafe revisions', () => {
+      for (const base of ['-rf', '--upload-pack=calc', 'a..b', 'HEAD:secret', 42]) {
+        expect(validateWorkspaceCreateParams({ worktree: 'feat/x', base })).toContain('Invalid base ref');
+      }
+    });
+
+    it('accepts an omitted base, HEAD~3, a branch and a hash', () => {
+      for (const base of [undefined, 'HEAD~3', 'origin/main', 'abc1234']) {
+        expect(validateWorkspaceCreateParams({ worktree: 'feat/x', base })).toBeNull();
+      }
+    });
+
+    it('refuses --base without --worktree', () => {
+      expect(validateWorkspaceCreateParams({ base: 'main' })).toContain('only valid with --worktree');
+    });
+
+    it('answers -32602 over the pipe for a dash-led base, before any window is asked', () => {
+      const respond = vi.fn();
+      const respondError = vi.fn();
+      handleBridgeV2('workspace.create', { worktree: 'feat/x', base: '--output=x' }, respond, respondError);
+      expect(respondError).toHaveBeenCalledWith(-32602, expect.stringContaining('Invalid base ref'));
+      expect(respond).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('prepareWorkspaceCreateParams: the CALLER\'s repository (#246)', () => {
+    const rootOf = (id: string) => (id === 'surf-caller' ? { realRoot: 'C:\\callers-repo' } : null);
+
+    it('fills cwd from the calling surface\'s reported folder', () => {
+      expect(prepareWorkspaceCreateParams({ worktree: 'feat/x', caller: 'surf-caller' }, rootOf))
+        .toEqual({ worktree: 'feat/x', caller: 'surf-caller', cwd: 'C:\\callers-repo' });
+    });
+
+    it('an explicit cwd wins over the caller', () => {
+      const params = { worktree: 'feat/x', caller: 'surf-caller', cwd: 'C:\\explicit' };
+      expect(prepareWorkspaceCreateParams(params, rootOf)).toBe(params);
+    });
+
+    it('refuses rather than guesses when neither is known', () => {
+      expect(prepareWorkspaceCreateParams({ worktree: 'feat/x' }, rootOf)).toEqual({ error: expect.stringContaining('pass --cwd') });
+      expect(prepareWorkspaceCreateParams({ worktree: 'feat/x', caller: 'surf-unknown' }, rootOf)).toEqual({ error: expect.stringContaining('pass --cwd') });
+    });
+
+    it('leaves a plain workspace.create untouched', () => {
+      const params = { title: 'x', caller: 'surf-caller' };
+      expect(prepareWorkspaceCreateParams(params, rootOf)).toBe(params);
     });
   });
 });

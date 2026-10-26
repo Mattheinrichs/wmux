@@ -972,23 +972,43 @@ async function cmdMarkdown(args: string[]): Promise<void> {
  * by whatever the user later puts in config.toml, which is the better contract
  * for a script anyway.
  */
+const NEW_WORKSPACE_FLAGS: Record<string, string> = {
+  '--title': 'title',
+  '--shell': 'shell',
+  '--cwd': 'cwd',
+  '--panes': 'panes',
+  '--layout': 'layout',
+  '--worktree': 'worktree',
+  '--base': 'base',
+};
+
 async function cmdNewWorkspace(args: string[]): Promise<void> {
   const params: any = {};
   for (let i = 1; i < args.length; i += 2) {
-    if (args[i] === '--title') params.title = args[i + 1];
-    if (args[i] === '--shell') params.shell = args[i + 1];
-    if (args[i] === '--cwd') params.cwd = args[i + 1];
-    if (args[i] === '--panes') params.panes = parseInt(args[i + 1], 10);
-    if (args[i] === '--layout') params.layout = args[i + 1];
-    if (args[i] === '--worktree') params.worktree = args[i + 1];
-    if (args[i] === '--base') params.base = args[i + 1];
+    const key = NEW_WORKSPACE_FLAGS[args[i]];
+    if (key) params[key] = key === 'panes' ? parseInt(args[i + 1], 10) : args[i + 1];
   }
   // A non-numeric --panes must not travel as NaN: it serialises to `null` in
   // JSON and arrives looking like a deliberate value.
   if (params.panes !== undefined && !Number.isFinite(params.panes)) {
     fail('new-workspace', COMMAND_SPECS['new-workspace'], '--panes takes a number from 1 to 8');
   }
+  if (params.worktree !== undefined) Object.assign(params, worktreeRepoDir(params.cwd));
   print(await sendV2('workspace.create', params));
+}
+
+/**
+ * Which repository `--worktree` branches from: the CALLER's, never the
+ * focused workspace's (#246). An explicit `--cwd` resolves against this
+ * shell's directory; inside a pane main reads the caller surface's reported
+ * cwd (sendV2 attaches `caller`); outside one, this process's cwd is the
+ * caller's. Over `--remote` a local path means nothing on the other machine,
+ * so it is passed through untouched.
+ */
+function worktreeRepoDir(cwd: unknown): { cwd?: string } {
+  if (remoteTarget) return typeof cwd === 'string' ? { cwd } : {};
+  if (typeof cwd === 'string' && cwd) return { cwd: path.resolve(process.cwd(), cwd) };
+  return process.env.WMUX_SURFACE_ID ? {} : { cwd: process.cwd() };
 }
 
 /**
@@ -2115,7 +2135,8 @@ export const COMMAND_SPECS = {
     usage: 'wmux new-workspace [--title T] [--shell S] [--cwd D] [--panes N] [--layout L] [--worktree B] [--base R]\n'
       + '  --panes     1-8 terminal panes (default: the [workspace] setting, 3)\n'
       + '  --layout    grid | columns | rows | left | down | single\n'
-      + '  --worktree  Branch name for a dedicated Git worktree workspace\n'
+      + '  --worktree  New branch, checked out in a dedicated Git worktree workspace\n'
+      + '              (repository: --cwd, else the calling pane\'s folder)\n'
       + '  --base      Base branch or commit for the worktree (default: HEAD)',
     value: ['--title', '--shell', '--cwd', '--panes', '--layout', '--worktree', '--base'],
   },
