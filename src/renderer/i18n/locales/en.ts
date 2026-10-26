@@ -634,6 +634,16 @@ export const en = {
   'settings.workspacePanel.preventDisplaySleep': 'Keep display awake',
   'settings.workspacePanel.preventDisplaySleepHint':
     'Also keep screens awake to prevent Windows lock screen or display timeout. When disabled (default), system sleep is prevented while screens may turn off.',
+
+  'titlebar.keepAwake.title': 'Keep computer awake',
+  'titlebar.keepAwake.on': 'On',
+  'titlebar.keepAwake.onHint': 'Keep this computer awake continuously',
+  'titlebar.keepAwake.smart': 'Smart',
+  'titlebar.keepAwake.smartHint': 'Stay awake while an agent is working',
+  'titlebar.keepAwake.off': 'Off',
+  'titlebar.keepAwake.offHint': 'Allow normal system sleep behavior',
+  'titlebar.keepAwake.active': 'Active',
+  'titlebar.keepAwake.inactive': 'Inactive',
 'settings.workspacePanel.autoOpenDiff': 'Auto-open diff tab on agent edits',
   'settings.workspacePanel.autoOpenDiffHint':
     'When an agent edits or writes files, wmux pops a diff tab in the bottom pane. Turn this off to stop it appearing.',

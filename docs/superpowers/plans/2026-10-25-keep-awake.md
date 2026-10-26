@@ -176,31 +176,45 @@
 
 ---
 
-### Task 4: Titlebar Coffee Cup Quick-Control Component
+### Task 4: Titlebar Coffee Cup Quick Menu
 
 **Files:**
 - Modify: `src/renderer/components/Titlebar/icons.tsx`
+- New: `src/renderer/components/Titlebar/KeepAwakeMenu.tsx`
 - Modify: `src/renderer/components/Titlebar/Titlebar.tsx`
 - Modify: `src/renderer/styles/titlebar.css`
+- Modify: `src/renderer/i18n/locales/en.ts`
 - Test: `tests/unit/titlebar-awake.test.ts`
 
 **Interfaces:**
 - Consumes: `KeepAwakeState`
-- Produces: Titlebar Coffee button with visual active/inactive states and mode cycling on click.
+- Produces: Titlebar Coffee button that opens a dropdown panel (On / Smart / Off, each with a
+  one-line description, plus a live `"<Mode> · Active/Inactive"` status line) — same anchored-panel
+  pattern as `NotificationBell`/`NotificationPanel`.
 
-- [ ] **Step 1: Write unit test for Titlebar Coffee button rendering and click handler**
+- [ ] **Step 1: Write unit tests for `KeepAwakeMenu`**
   In `tests/unit/titlebar-awake.test.ts`:
-  - Test rendering `IconCoffee` with title/tooltip reflecting mode and active state.
-  - Test clicking cycles through `smart` -> `always` -> `off` -> `smart`.
+  - Keep the existing `IconCoffee` rendering tests.
+  - Render `KeepAwakeMenu` with no `window.wmux` and assert the trigger button renders.
+  - Assert the exported `KEEP_AWAKE_OPTIONS` table is exactly `always`/`smart`/`off` labeled
+    On/Smart/Off (static environment only — `vitest.config.ts` runs `node`, no jsdom, so there is
+    no click-interaction test here; that stays a manual/dev-build check).
 
 - [ ] **Step 2: Run test to verify failure**
   Run: `npx vitest run tests/unit/titlebar-awake.test.ts`
-  Expected: FAIL.
+  Expected: FAIL (`KeepAwakeMenu` doesn't exist yet).
 
-- [ ] **Step 3: Add `IconCoffee` and integrate into `Titlebar.tsx`**
-  - Add SVG icon in `icons.tsx`.
-  - Add coffee button beside Focus Mode in `Titlebar.tsx`.
-  - Add CSS classes in `titlebar.css` (`.titlebar__btn--awake-active`, etc.).
+- [ ] **Step 3: Add `KeepAwakeMenu.tsx` and wire it into `Titlebar.tsx`**
+  - Move the `awakeState` subscription + `window.wmux.awake` calls out of `Titlebar.tsx` into the
+    new component (self-contained, like `NotificationBell` owns its own panel).
+  - Replace the old click-to-cycle button with `<KeepAwakeMenu />` beside Focus Mode.
+  - Add panel CSS in `titlebar.css` (`.keep-awake-panel*`, reusing the `--ui-bg-1`/`--ui-overlay-rgb`
+    tokens `notification-panel.css` already uses for the same shape of popover).
+  - Add a third trigger-button state, `.titlebar__btn--awake-armed` (`--ui-accent` at reduced
+    opacity): a mode selected but not yet holding a blocker (`smart`/`always`, `isActive: false`)
+    rendered identically to the unselected default otherwise — nothing on the titlebar showed the
+    user their choice had taken effect until an agent actually started working.
+  - Add `titlebar.keepAwake.*` strings to `en.ts` (title, on/smart/off labels + hints, active/inactive).
 
 - [ ] **Step 4: Run test to verify it passes**
   Run: `npx vitest run tests/unit/titlebar-awake.test.ts`
@@ -208,8 +222,8 @@
 
 - [ ] **Step 5: Commit**
   ```bash
-  git add src/renderer/components/Titlebar/icons.tsx src/renderer/components/Titlebar/Titlebar.tsx src/renderer/styles/titlebar.css tests/unit/titlebar-awake.test.ts
-  git commit -m "feat(awake): add coffee cup toggle button to Titlebar"
+  git add src/renderer/components/Titlebar/KeepAwakeMenu.tsx src/renderer/components/Titlebar/Titlebar.tsx src/renderer/styles/titlebar.css src/renderer/i18n/locales/en.ts tests/unit/titlebar-awake.test.ts
+  git commit -m "feat(awake): replace titlebar cycle-click with a Keep Awake dropdown menu"
   ```
 
 ---

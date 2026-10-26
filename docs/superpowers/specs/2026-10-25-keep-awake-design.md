@@ -51,7 +51,7 @@ wmux implements an **Agent-Aware Awake Manager** in the Electron main process, b
 │    ▼                                                   │
 │  useStore (settings / awake slice)                     │
 │    │                                                   │
-│    ├──► Titlebar.tsx (IconCoffee quick toggle)         │
+│    ├──► KeepAwakeMenu.tsx (titlebar quick menu)        │
 │    └──► WorkspaceSettings.tsx (Preferences & Policy)   │
 └────────────────────────────────────────────────────────┘
 ```
@@ -75,15 +75,18 @@ New IPC channels:
 - `awake:set-prevent-display-sleep`: toggles whether display sleep is also prevented.
 - `awake:state-changed`: push notification to renderer when active status changes.
 
-### C. Renderer UI: Titlebar Quick Control
-- Added to `src/renderer/components/Titlebar/Titlebar.tsx` next to Focus Mode and Explorer buttons.
-- SVG Coffee Cup Icon (`IconCoffee` in `src/renderer/components/Titlebar/icons.tsx`):
-  - **Smart + Active:** Highlighted/amber cup with steam indicator.
-  - **Smart + Inactive:** Muted cup (armed, waiting for agent to start working).
-  - **Always On:** Solid highlighted cup.
-  - **Off:** Cup with subtle diagonal slash or lowered opacity.
-- **Click:** Cycles modes (`smart` → `always` → `off` → `smart`) or toggles.
-- **Tooltip:** Dynamic feedback (e.g., `Keep Awake: Smart (Active — 2 agents working)`).
+### C. Renderer UI: Titlebar Quick Menu
+- `src/renderer/components/Titlebar/KeepAwakeMenu.tsx` — a self-contained popover (same anchored-panel pattern as `NotificationBell`/`NotificationPanel`), mounted in `Titlebar.tsx` next to Focus Mode and Explorer.
+- SVG Coffee Cup Icon (`IconCoffee` in `src/renderer/components/Titlebar/icons.tsx`) is the trigger button:
+  - **Active** (`isActive: true`, any mode): highlighted/amber cup, full-opacity steam (`.titlebar__btn--awake-active`).
+  - **Armed** (`smart`/`always` selected, `isActive: false` — waiting for an agent): outline cup tinted with `--ui-accent` at reduced opacity (`.titlebar__btn--awake-armed`) — needed so a selected-but-idle mode doesn't read as indistinguishable from the unselected default.
+  - **Off:** outline cup at reduced opacity (`.titlebar__btn--awake-off`).
+- **Click:** opens a dropdown panel (closes on outside click, Escape, or picking an option) — replaces the old click-to-cycle behavior.
+- **Panel contents:** header (`Keep computer awake` · live status `"<Mode> · Active/Inactive"`), then three radio rows, each a label + one-line description, selecting one calls `setMode` directly:
+  - **On** (`always`) — "Keep this computer awake continuously"
+  - **Smart** (`smart`) — "Stay awake while an agent is working"
+  - **Off** (`off`) — "Allow normal system sleep behavior"
+- Data lives in an exported `KEEP_AWAKE_OPTIONS` table (mode/i18n key/fallback label+hint), not duplicated per JSX row.
 
 ### D. Settings & Config Integration
 - **Settings UI (`src/renderer/components/Settings/WorkspaceSettings.tsx`):**
