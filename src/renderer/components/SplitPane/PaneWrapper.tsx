@@ -6,6 +6,7 @@ import KeptAliveTerminal from '../Terminal/KeptAliveTerminal';
 import BrowserPane from '../Browser/BrowserPane';
 import MarkdownPane from '../Markdown/MarkdownPane';
 import DiffPane from '../Diff/DiffPane';
+import { worktreeDiffBase } from '../Diff/diff-base';
 import CodePane from '../Code/CodePane';
 import PromptsPane from '../Terminal/PromptsPane';
 import GitPane from '../Git/GitPane';
@@ -374,8 +375,15 @@ export default function PaneWrapper({
             />
           )}
           {/* A tab opened from the explorer is pinned to the explorer's root
-              (#325); one made by Ctrl+Shift+G follows the workspace. */}
-          {surface.type === 'diff' && <DiffPane surfaceId={surface.id} cwd={surface.cwd ?? workspace?.cwd} baseRef={workspace?.worktree?.baseSha} />}
+              (#325); one made by Ctrl+Shift+G follows the workspace. A
+              worktree workspace's base applies only inside its worktree. */}
+          {surface.type === 'diff' && (
+            <DiffPane
+              surfaceId={surface.id}
+              cwd={surface.cwd ?? workspace?.cwd}
+              baseRef={worktreeDiffBase(surface.cwd ?? workspace?.cwd, workspace?.worktree)}
+            />
+          )}
           {surface.type === 'code' && <CodePane surfaceId={surface.id} />}
           {surface.type === 'prompts' && <PromptsPane surfaceId={surface.id} />}
           {/* Pinned to its own folder (#362): it never follows focus. */}
