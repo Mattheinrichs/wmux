@@ -8,8 +8,8 @@
  * Any folder inside the repository works as the pin; main asks git for the
  * top level and the worktree list from there.
  */
-import type { PaneId, SurfaceId, WorkspaceId, WorkspaceInfo } from '../../../shared/types';
-import { findLeaf, getAllPaneIds } from '../../store/split-utils';
+import type { PaneId, SplitNode, SurfaceId, WorkspaceId, WorkspaceInfo } from '../../../shared/types';
+import { findLeaf, getAllPaneIds, patchLeafPrimarySurface, splitNode } from '../../store/split-utils';
 
 export interface OpenGitOps {
   workspaces: WorkspaceInfo[];
@@ -51,6 +51,53 @@ export function openGitView(ops: OpenGitOps, workspaceId: WorkspaceId, paneId: P
   }
   const root = gitRootFor(workspace, target);
   return ops.addSurface(workspaceId, target, 'git', root ? { cwd: root } : undefined);
+}
+
+/** Every Git tab in a workspace, with the pane that holds it. */
+export function gitSurfacesIn(workspace: WorkspaceInfo): Array<{ paneId: PaneId; surfaceId: SurfaceId }> {
+  const found: Array<{ paneId: PaneId; surfaceId: SurfaceId }> = [];
+  for (const paneId of getAllPaneIds(workspace.splitTree)) {
+    const leaf = findLeaf(workspace.splitTree, paneId);
+    for (const s of leaf?.surfaces ?? []) if (s.type === 'git') found.push({ paneId, surfaceId: s.id });
+  }
+  return found;
+}
+
+export interface ToggleGitOps {
+  workspaces: WorkspaceInfo[];
+  updateSplitTree: (workspaceId: WorkspaceId, tree: SplitNode) => void;
+  closeSurface: (workspaceId: WorkspaceId, paneId: PaneId, surfaceId: SurfaceId) => void;
+}
+
+/**
+ * The titlebar's Git button: a panel toggle, not a tab opener. With no Git
+ * view in the workspace it splits one to the RIGHT of the focused pane, so the
+ * terminal it was opened from stays visible (Ctrl+Alt+G, by contrast, opens a
+ * tab IN the focused pane). With one or more open, it closes them all. The
+ * button's lit state is derived from the tree, never stored beside it, so a
+ * Git tab closed by its own × turns the button off too.
+ */
+export function toggleGitView(
+  ops: ToggleGitOps,
+  workspaceId: WorkspaceId,
+  paneId: PaneId | null,
+  newPaneId: PaneId,
+): 'opened' | 'closed' | null {
+  const workspace = ops.workspaces.find((w) => w.id === workspaceId);
+  if (!workspace) return null;
+  const open = gitSurfacesIn(workspace);
+  if (open.length > 0) {
+    for (const { paneId: p, surfaceId } of open) ops.closeSurface(workspaceId, p, surfaceId);
+    return 'closed';
+  }
+  const panes = getAllPaneIds(workspace.splitTree);
+  const target = paneId && panes.includes(paneId) ? paneId : panes[0];
+  if (!target) return null;
+  const root = gitRootFor(workspace, target);
+  let tree = splitNode(workspace.splitTree, target, newPaneId, 'git', 'horizontal');
+  if (root) tree = patchLeafPrimarySurface(tree, newPaneId, { cwd: root });
+  ops.updateSplitTree(workspaceId, tree);
+  return 'opened';
 }
 
 export const FOCUS_SURFACE_EVENT = 'wmux:focus-surface';

@@ -113,6 +113,18 @@ export function IconFolder({ className, size = 16 }: IconProps) {
   );
 }
 
+/** Git branch — the project Git view (#362). */
+export function IconGitBranch({ className, size = 16 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" strokeWidth={2} {...base} aria-hidden="true">
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="7" r="2" />
+      <path d="M6 7v10" />
+      <path d="M18 9c0 5-6 4-11.2 8.6" />
+    </svg>
+  );
+}
 
 /** Coffee cup — Keep awake (caffeine / lid) icon */
 export function IconCoffee({ className, size = 16, active = false }: IconProps & { active?: boolean }) {

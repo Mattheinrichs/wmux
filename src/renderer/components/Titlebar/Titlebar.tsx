@@ -10,7 +10,7 @@ import logoSrc from '../../../../resources/icons/icon.svg';
 import NotificationBell from './NotificationBell';
 import UpdateBadge from './UpdateBadge';
 import KeepAwakeMenu from './KeepAwakeMenu';
-import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder, IconSidebar } from './icons';
+import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder, IconSidebar, IconGitBranch } from './icons';
 import WindowControls, { useIsFramelessWindow } from './WindowControls';
 import { NotificationInfo, WorkspaceId, PaneId, SurfaceId } from '../../../shared/types';
 import { useT } from '../../i18n';
@@ -41,6 +41,10 @@ interface TitlebarProps {
    *  panel once it has been closed. */
   explorerOpen?: boolean;
   onToggleExplorer?: () => void;
+  /** Project Git view (#362) of the active workspace: open beside the focused
+   *  pane, or close. Lit while the workspace shows one. */
+  gitOpen?: boolean;
+  onToggleGit?: () => void;
 }
 
 export default function Titlebar({
@@ -62,6 +66,8 @@ export default function Titlebar({
   onToggleFocusMode,
   explorerOpen,
   onToggleExplorer,
+  gitOpen,
+  onToggleGit,
 }: TitlebarProps) {
   const t = useT();
   const sidebarLabel = sidebarVisible
@@ -71,6 +77,8 @@ export default function Titlebar({
   // advertised as Ctrl+Shift+X would teach the user a key that does nothing.
   const explorerBinding = formatBinding(useStore((s) => s.shortcuts.toggleExplorer));
   const explorerLabel = t('shortcutAction.toggleExplorer', 'Toggle file explorer');
+  const gitBinding = formatBinding(useStore((s) => s.shortcuts.openGitPanel));
+  const gitLabel = t('titlebar.gitView', 'Toggle Git view');
   // Clear-transparency windows are frameless and have no native caption
   // buttons, so this is where they come from.
   const frameless = useIsFramelessWindow();
@@ -145,6 +153,17 @@ export default function Titlebar({
             aria-pressed={!!explorerOpen}
           >
             <IconFolder />
+          </button>
+        )}
+        {onToggleGit && (
+          <button
+            className={`titlebar__btn${gitOpen ? ' titlebar__btn--active' : ''}`}
+            onClick={onToggleGit}
+            title={gitBinding ? `${gitLabel} (${t('titlebar.gitViewTab', 'as a tab')}: ${gitBinding})` : gitLabel}
+            aria-label={gitLabel}
+            aria-pressed={!!gitOpen}
+          >
+            <IconGitBranch />
           </button>
         )}
       </div>

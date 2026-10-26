@@ -64,7 +64,8 @@ import { installRemoteRendererHandler } from './utils/remote-snapshot';
 import { formatRemoteNotice } from './utils/remote-notice';
 import { SESSION_SAVE_NOW_EVENT } from './utils/session-save-now';
 import { followOutputFor, togglePinnedPromptFor, togglePromptOutlineFor } from './store/prompt-actions';
-import { FOCUS_SURFACE_EVENT, openGitView } from './components/Git/open-git';
+import { v4 as uuid } from 'uuid';
+import { FOCUS_SURFACE_EVENT, gitSurfacesIn, openGitView, toggleGitView } from './components/Git/open-git';
 import { useT } from './i18n';
 import type { TranslationKey } from './i18n';
 
@@ -1225,6 +1226,13 @@ export default function App() {
 
   // Auto-focus first pane whenever the active workspace changes or gains its first pane
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) ?? null;
+  // The titlebar Git button's lit state: derived from the tree, so a Git tab
+  // closed with its own × turns the button off as well.
+  const gitViewOpen = !!activeWorkspace && gitSurfacesIn(activeWorkspace).length > 0;
+  const handleToggleGit = useCallback(() => {
+    if (!activeWorkspaceId) return;
+    toggleGitView(useStore.getState(), activeWorkspaceId, focusedPaneId, `pane-${uuid()}` as PaneId);
+  }, [activeWorkspaceId, focusedPaneId]);
   // During drag use live browserWidth state; otherwise use the persisted value from the
   // workspace (falls back to browserWidth for workspaces that have never been resized).
   //
@@ -1695,6 +1703,8 @@ export default function App() {
         onToggleFocusMode={() => setFocusMode((on) => !on)}
         explorerOpen={explorerOpen}
         onToggleExplorer={() => handleToggleExplorer()}
+        gitOpen={gitViewOpen}
+        onToggleGit={handleToggleGit}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>

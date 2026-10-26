@@ -58,6 +58,8 @@ export const fr: Translation = {
   'titlebar.help': 'Aide / Tutoriel',
   'titlebar.devtools': 'Afficher/Masquer les outils de développement',
   'titlebar.settings': 'Paramètres (Ctrl+,)',
+  'titlebar.gitView': 'Afficher/masquer la vue Git',
+  'titlebar.gitViewTab': 'en onglet',
   'titlebar.focusMode': 'Mode focus : assombrir tous les panes sauf celui qui a le focus',
   'titlebar.updateAvailable': 'Mise à jour disponible',
   'titlebar.updateDownload': 'Clic pour télécharger sur GitHub',
