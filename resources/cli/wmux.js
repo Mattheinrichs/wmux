@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RAW_V1_VERBS = exports.OPEN_URL_TIMEOUT_MS = void 0;
+exports.COMMAND_SPECS = exports.RAW_V1_VERBS = exports.OPEN_URL_TIMEOUT_MS = void 0;
 exports.cliPipePath = cliPipePath;
 exports.timeoutMessage = timeoutMessage;
 exports.browserRequest = browserRequest;
@@ -509,7 +509,7 @@ function subcommandError(command, sub) {
 }
 /** Print why the subcommand was rejected, then that group's usage, then exit 1. */
 function failSubcommand(command, sub) {
-    return fail(command, COMMAND_SPECS[command], subcommandError(command, sub));
+    return fail(command, exports.COMMAND_SPECS[command], subcommandError(command, sub));
 }
 /** Words for `lastError`, matching what Settings → Remote says for each code. */
 const REMOTE_ERROR_WORDS = {
@@ -605,7 +605,7 @@ function flagsOrFail(command, tokens, flags) {
         return parseFlagArgs(tokens, flags);
     }
     catch (err) {
-        return fail(command, COMMAND_SPECS[command], err.message);
+        return fail(command, exports.COMMAND_SPECS[command], err.message);
     }
 }
 function agentSpawn(args) {
@@ -651,7 +651,7 @@ function agentSpawnBatch(args) {
     catch (err) {
         // The same PowerShell 5.1 quote-eating as #247 arrives here as JSON with
         // its quotes gone; say so rather than dumping a SyntaxError stack.
-        return fail('agent', COMMAND_SPECS.agent, `--json is not valid JSON (${err.message}).`);
+        return fail('agent', exports.COMMAND_SPECS.agent, `--json is not valid JSON (${err.message}).`);
     }
     const strategy = values['--strategy'] || 'distribute';
     return sendV2('agent.spawn_batch', { agents: parsed, strategy, workspaceId: values['--workspace'] });
@@ -809,7 +809,7 @@ async function cmdLayout(args) {
     if (args[1] === 'agents') {
         const parsed = layoutAgentsParams(args.slice(2), process.env.WMUX_SURFACE_ID);
         if ('error' in parsed)
-            fail('layout', COMMAND_SPECS.layout, parsed.error);
+            fail('layout', exports.COMMAND_SPECS.layout, parsed.error);
         print(await sendV2('layout.agents', parsed.params));
         return;
     }
@@ -973,26 +973,45 @@ async function cmdMarkdown(args) {
  * by whatever the user later puts in config.toml, which is the better contract
  * for a script anyway.
  */
+const NEW_WORKSPACE_FLAGS = {
+    '--title': 'title',
+    '--shell': 'shell',
+    '--cwd': 'cwd',
+    '--panes': 'panes',
+    '--layout': 'layout',
+    '--worktree': 'worktree',
+    '--base': 'base',
+};
 async function cmdNewWorkspace(args) {
     const params = {};
     for (let i = 1; i < args.length; i += 2) {
-        if (args[i] === '--title')
-            params.title = args[i + 1];
-        if (args[i] === '--shell')
-            params.shell = args[i + 1];
-        if (args[i] === '--cwd')
-            params.cwd = args[i + 1];
-        if (args[i] === '--panes')
-            params.panes = parseInt(args[i + 1], 10);
-        if (args[i] === '--layout')
-            params.layout = args[i + 1];
+        const key = NEW_WORKSPACE_FLAGS[args[i]];
+        if (key)
+            params[key] = key === 'panes' ? parseInt(args[i + 1], 10) : args[i + 1];
     }
     // A non-numeric --panes must not travel as NaN: it serialises to `null` in
     // JSON and arrives looking like a deliberate value.
     if (params.panes !== undefined && !Number.isFinite(params.panes)) {
-        fail('new-workspace', COMMAND_SPECS['new-workspace'], '--panes takes a number from 1 to 8');
+        fail('new-workspace', exports.COMMAND_SPECS['new-workspace'], '--panes takes a number from 1 to 8');
     }
+    if (params.worktree !== undefined)
+        Object.assign(params, worktreeRepoDir(params.cwd));
     print(await sendV2('workspace.create', params));
+}
+/**
+ * Which repository `--worktree` branches from: the CALLER's, never the
+ * focused workspace's (#246). An explicit `--cwd` resolves against this
+ * shell's directory; inside a pane main reads the caller surface's reported
+ * cwd (sendV2 attaches `caller`); outside one, this process's cwd is the
+ * caller's. Over `--remote` a local path means nothing on the other machine,
+ * so it is passed through untouched.
+ */
+function worktreeRepoDir(cwd) {
+    if (remoteTarget)
+        return typeof cwd === 'string' ? { cwd } : {};
+    if (typeof cwd === 'string' && cwd)
+        return { cwd: path_1.default.resolve(process.cwd(), cwd) };
+    return process.env.WMUX_SURFACE_ID ? {} : { cwd: process.cwd() };
 }
 /**
  * The workspace this shell lives in. An agent knows its own surface
@@ -2010,7 +2029,7 @@ const AGENT_STATE_COMMANDS = {
     },
 };
 const SURFACE_NOTE = '(surface defaults to $WMUX_SURFACE_ID inside a pane)';
-const COMMAND_SPECS = {
+exports.COMMAND_SPECS = {
     // System
     ping: { usage: 'wmux ping' },
     identify: { usage: 'wmux identify' },
@@ -2048,10 +2067,13 @@ const COMMAND_SPECS = {
     },
     // Workspace
     'new-workspace': {
-        usage: 'wmux new-workspace [--title T] [--shell S] [--cwd D] [--panes N] [--layout L]\n'
-            + '  --panes  1-8 terminal panes (default: the [workspace] setting, 3)\n'
-            + '  --layout grid | columns | rows | left | down | single',
-        value: ['--title', '--shell', '--cwd', '--panes', '--layout'],
+        usage: 'wmux new-workspace [--title T] [--shell S] [--cwd D] [--panes N] [--layout L] [--worktree B] [--base R]\n'
+            + '  --panes     1-8 terminal panes (default: the [workspace] setting, 3)\n'
+            + '  --layout    grid | columns | rows | left | down | single\n'
+            + '  --worktree  New branch, checked out in a dedicated Git worktree workspace\n'
+            + '              (repository: --cwd, else the calling pane\'s folder)\n'
+            + '  --base      Base branch or commit for the worktree (default: HEAD)',
+        value: ['--title', '--shell', '--cwd', '--panes', '--layout', '--worktree', '--base'],
     },
     ssh: { usage: 'wmux ssh [ssh options] <user@host> [--title T]', passthrough: true },
     'close-workspace': { usage: 'wmux close-workspace [workspaceId]' },
@@ -2299,7 +2321,7 @@ function cmdHelp(args) {
         printUsage();
         return;
     }
-    const spec = COMMAND_SPECS[topic];
+    const spec = exports.COMMAND_SPECS[topic];
     if (!spec) {
         console.error(`Unknown command: ${topic}`);
         printUsage();
@@ -2472,7 +2494,7 @@ async function main() {
     }
     // Usage and flag checks both happen before a single byte reaches the pipe, so
     // probing the CLI can no longer mutate the user's layout (issue #143).
-    const spec = COMMAND_SPECS[command];
+    const spec = exports.COMMAND_SPECS[command];
     if (!spec.passthrough && (args.includes('--help') || args.includes('-h'))) {
         console.log(spec.usage);
         process.exit(0);
