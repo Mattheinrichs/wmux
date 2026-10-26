@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isSafeRev } from './git-view';
+import { gitExecutable, isSafeRev } from './git-view';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,9 +15,12 @@ export interface ChangedFile {
 
 // ─── Git helpers ───────────────────────────────────────────────────────────
 
+// Absolute git, never a bare `git`: libuv searches the child's cwd before
+// PATH, and cwd here is whatever repo the pane is in — a committed git.exe
+// there would run on every diff poll. Same resolver as git-view.ts.
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', args, {
+    const { stdout } = await execFileAsync(gitExecutable(), args, {
       cwd,
       windowsHide: true,
       timeout: 10_000,
