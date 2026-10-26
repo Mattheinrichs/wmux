@@ -1380,7 +1380,9 @@ export default function App() {
         explorerWidth: ws.explorerWidth,
         explorerExpanded: ws.explorerExpanded,
         explorerShowHidden: ws.explorerShowHidden,
-        // worktree is deliberately omitted (§5.4): named sessions are reusable templates; saving a live checkout into a template would cause two workspaces to claim the same directory.
+        // The worktree binding survives a named save like every other field
+        // (#366): dropping it turned a live checkout into an anonymous folder.
+        worktree: ws.worktree,
       })),
       sidebarWidth: sidebarWidthRef.current,
       terminalPrefs: { ...state.terminalPrefs },

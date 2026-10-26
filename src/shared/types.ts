@@ -43,6 +43,29 @@ export interface WorktreeMetadata {
   worktreePath: string;  // always under the wmux root; nothing else is removable
 }
 
+/**
+ * How the close dialog ends a worktree workspace (#366). `keep` removes the
+ * checkout only when git status (ignored files included) lists nothing and
+ * never touches the branch; `discard` force-removes it and deletes the branch
+ * main recorded. Anything else leaves the directory on disk.
+ */
+export type WorktreeCloseMode = 'keep' | 'discard';
+
+export interface WorktreeRemoveResult {
+  outcome: 'removed' | 'has-work' | 'not-ours' | 'absent' | 'left-behind' | 'error';
+  /** Entries git status listed, for `has-work`. */
+  count?: number;
+  /** Discard only: whether `git branch -D` succeeded. */
+  branchDeleted?: boolean;
+  message?: string;
+}
+
+export interface WorktreeInspectResult {
+  outcome: 'clean' | 'has-work' | 'not-ours' | 'absent' | 'error';
+  count?: number;
+  message?: string;
+}
+
 export interface SurfaceRef {
   id: SurfaceId;
   type: SurfaceType;
@@ -922,7 +945,7 @@ export const IPC_CHANNELS = {
   GIT_WORKTREE_CREATE: 'git-worktree:create',
   GIT_WORKTREE_REMOVE: 'git-worktree:remove',
   GIT_WORKTREE_PROBE: 'git-worktree:probe',
-  WORKTREE_DELETE_BRANCH: 'worktree:delete-branch',
+  GIT_WORKTREE_INSPECT: 'git-worktree:inspect',
 } as const;
 
 /**
@@ -1013,19 +1036,3 @@ export function engineOf(surface: { type: SurfaceType; browserEngine?: BrowserEn
   return surface.browserEngine === 'agent' ? 'agent' : 'web';
 }
 
-
-/**
- * Preload bridge interface for window.wmux.worktree (#7).
- */
-export interface WorktreeBridge {
-  create: (repoDir: string, branch: string, base?: string) => Promise<any>;
-  remove: (worktreePath: string) => Promise<any>;
-  probe: (dir: string) => Promise<any>;
-  deleteBranch: (repoRoot: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
-}
-
-declare global {
-  interface Window {
-    wmux: any;
-  }
-}

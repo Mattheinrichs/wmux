@@ -1,45 +1,82 @@
+/**
+ * Git worktree workspaces (#366) — the main-process half.
+ *
+ * A worktree workspace is a checkout wmux created for one branch, under
+ * `%LOCALAPPDATA%\wmux\wt\<repo-slug>\<branch-dir>`. Creating one is cheap;
+ * REMOVING one is where user work dies, so the whole module is organised
+ * around one rule: **wmux never destroys work it was not explicitly told to
+ * destroy, and when in doubt it leaves the files on disk and says so.**
+ *
+ * - There is no background sweep. A startup collector once removed "unclaimed
+ *   clean" worktrees, and every update restored from a backup that had dropped
+ *   the claim, so it removed live checkouts. Closing a worktree workspace any
+ *   way other than the dialog's two buttons leaves the directory alone.
+ * - Keep (the default) never forces. `git worktree remove` without `--force`
+ *   refuses modified and untracked files but deletes IGNORED ones (`.env`,
+ *   local config) and exits 0, so a `status --ignored --untracked-files=all`
+ *   that lists anything at all makes Keep refuse with `has-work`.
+ * - A git failure is never followed by a recursive delete. `fs.rm` is reached
+ *   only after git exited 0 for the same path, and in Keep mode only on an
+ *   EMPTY leftover directory.
+ * - Only what main created is removable: the path must sit exactly two levels
+ *   under the worktree root, be recorded in main's own registry (repo, branch,
+ *   base — never anything the renderer says), and be listed by
+ *   `git worktree list --porcelain` of that repository.
+ * - Git is an ABSOLUTE executable (`gitExecutable` in git-view.ts) with no
+ *   shell; a ref or a branch name can never reach an option slot.
+ */
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { getLocalAppDataDir } from '../shared/instance';
-import type { WorktreeMetadata } from '../shared/types';
-import { PTY_EXIT_DRAIN_MS } from './quit-sequence';
-
-const execFileAsync = promisify(execFile);
+import type { WorktreeCloseMode, WorktreeMetadata, WorktreeRemoveResult, WorktreeInspectResult } from '../shared/types';
+import { gitExecutable, isSafeRev, parseWorktreePorcelain, worktreeKey } from './git-view';
 
 /** 24 each, measured: root is 37 chars and this repo's deepest node_modules
  *  path is 116, against a 260 limit with core.longpaths unset (D5). */
 export const SLUG_MAX = 24;
 
-export function isValidBranchName(name: string): boolean {
+/**
+ * How long a close waits for the workspace's shells to exit before asking git
+ * to remove the directory. On Windows a process whose cwd is inside the
+ * directory keeps it from being deleted, and git deletes the admin entry even
+ * when deleting the files failed — so removing too early leaves a half-removed
+ * checkout. Waiting costs a second; a premature attempt costs a broken tree.
+ */
+export const WORKTREE_CLOSE_DRAIN_MS = 1000;
+
+export function isValidBranchName(name: unknown): name is string {
   if (!name || typeof name !== 'string') return false;
-  if (name.length === 0 || name.length > 200) return false;
+  if (name.length > 200) return false;
   if (name.startsWith('-')) return false;
   if (name.includes('..')) return false;
   if (name.endsWith('.lock')) return false;
   if (name.startsWith('.') || name.startsWith('/')) return false;
   if (name.endsWith('/')) return false;
   // Whitelist: [A-Za-z0-9._/-] (D8 security boundary)
-  const validRegex = /^[A-Za-z0-9._/-]+$/;
-  return validRegex.test(name);
+  return /^[A-Za-z0-9._/-]+$/.test(name);
+}
+
+/** A `--base` as the user may write it: omitted (HEAD) or one safe revision. */
+export function isValidBaseRef(ref: unknown): boolean {
+  if (ref === undefined) return true;
+  if (typeof ref !== 'string') return false;
+  return ref.trim() === '' || isSafeRev(ref.trim());
+}
+
+function trimDashes(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start] === '-') start++;
+  while (end > start && text[end - 1] === '-') end--;
+  return text.slice(start, end);
 }
 
 export function slugSegment(text: string, max: number = SLUG_MAX): string {
   if (!text || typeof text !== 'string') return '';
-  // Replace any non-alphanumeric/non-dash characters with '-'
-  let slug = text.replace(/[^A-Za-z0-9-]/g, '-');
-  // Collapse consecutive dashes
-  slug = slug.replace(/-+/g, '-');
-  // Trim leading/trailing dashes
-  slug = slug.replace(/^-+|-+$/g, '');
-  if (slug.length > max) {
-    slug = slug.slice(0, max);
-    // Trim trailing dash if truncation created one
-    slug = slug.replace(/-+$/, '');
-  }
-  return slug;
+  const collapsed = text.replace(/[^A-Za-z0-9-]/g, '-').replace(/-+/g, '-');
+  return trimDashes(trimDashes(collapsed).slice(0, max));
 }
 
 export function worktreeRoot(): string {
@@ -47,29 +84,27 @@ export function worktreeRoot(): string {
 }
 
 export function worktreeSlug(repoRoot: string, branch: string): string {
-  const repoBase = path.basename(repoRoot);
-  const repoSlug = slugSegment(repoBase);
-  const branchSlug = slugSegment(branch);
-
+  const repoSlug = slugSegment(path.basename(repoRoot)) || 'repo';
+  const branchSlug = slugSegment(branch) || 'branch';
   const hashInput = (repoRoot || '').toLowerCase() + '\0' + (branch || '');
   const sha = crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 8);
-
   return `${repoSlug}/${branchSlug}-${sha}`;
 }
 
-export function isWmuxWorktreePath(root: string, candidate: string): boolean {
-  if (!root || !candidate) return false;
-  const normalizedRoot = path.resolve(root).toLowerCase();
-  const normalizedCandidate = path.resolve(candidate).toLowerCase();
-
-  // The root itself is NEVER a worktree (AC-5)
-  if (normalizedCandidate === normalizedRoot) {
-    return false;
-  }
-
-  // Must be strictly inside root with path separator
-  const prefix = normalizedRoot.endsWith(path.sep) ? normalizedRoot : normalizedRoot + path.sep;
-  return normalizedCandidate.startsWith(prefix);
+/**
+ * True only for `<root>\<repo-slug>\<branch-dir>` — exactly two levels under
+ * the root. The root itself, the repo-slug folder, anything deeper and
+ * anything outside are all refused: a single `git worktree remove` aimed one
+ * level too high is the whole set of checkouts for a repository.
+ */
+export function isManagedWorktreePath(root: string, candidate: string): boolean {
+  if (!root || !candidate || typeof candidate !== 'string') return false;
+  if (!path.isAbsolute(candidate)) return false;
+  const rel = path.relative(path.resolve(root), path.resolve(candidate));
+  if (!rel || path.isAbsolute(rel)) return false;
+  const parts = rel.split(/[\\/]/);
+  if (parts.length !== 2) return false;
+  return parts.every((p) => p !== '' && p !== '.' && p !== '..');
 }
 
 export function addArgs(worktreePath: string, branch: string, baseSha: string): string[] {
@@ -80,12 +115,26 @@ export function removeArgs(worktreePath: string, force: boolean): string[] {
   return force ? ['worktree', 'remove', '--force', worktreePath] : ['worktree', 'remove', worktreePath];
 }
 
-export function pruneArgs(): string[] {
-  return ['worktree', 'prune'];
+/** Everything Keep must not lose: modified, staged, untracked AND ignored. */
+export const STATUS_ARGS = ['status', '--porcelain=v1', '-z', '--ignored', '--untracked-files=all'];
+
+/** Number of entries in `git status --porcelain=v1 -z` output. */
+export function countStatusEntries(out: string): number {
+  const tokens = out.split('\0');
+  let count = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok.length < 4) continue;
+    count++;
+    // A rename or copy carries its source path as the NEXT token.
+    if (tok[0] === 'R' || tok[0] === 'C') i++;
+  }
+  return count;
 }
 
 export type AddErrorCode =
   | 'invalid_branch'
+  | 'invalid_base'
   | 'not_a_repo'
   | 'branch_exists'
   | 'branch_in_use'
@@ -95,626 +144,457 @@ export type AddErrorCode =
 export function classifyAddError(stderr: string): AddErrorCode {
   if (!stderr) return 'git_failed';
   const lower = stderr.toLowerCase();
-  if (lower.includes('is already used by worktree at')) {
-    return 'branch_in_use';
-  }
-  if (lower.includes('a branch named') || lower.includes('already exists')) {
-    return 'branch_exists';
-  }
+  if (lower.includes('is already used by worktree at')) return 'branch_in_use';
+  if (lower.includes('a branch named') || lower.includes('already exists')) return 'branch_exists';
   return 'git_failed';
 }
 
-export function classifyWorktreeDir(facts: {
-  hasGitFile: boolean;
-  isEmpty: boolean;
-  gitAnswered: boolean;
-}): 'leftover' | 'unreachable' | 'live' {
-  if (!facts.hasGitFile && facts.isEmpty) {
-    return 'leftover';
-  }
-  if (!facts.gitAnswered) {
-    return 'unreachable';
-  }
-  if (!facts.hasGitFile && !facts.isEmpty) {
-    return 'unreachable';
-  }
-  return 'live';
-}
+// ─── Impure half ─────────────────────────────────────────────────────────────
 
-// ─── Impure Half (#7) ────────────────────────────────────────────────────────
-
-export interface WorktreeRecord {
-  repoRoot: string;
-  branch: string;
-  baseBranch: string;
-  baseSha: string;
-  worktreePath: string;
-}
+export type WorktreeRecord = WorktreeMetadata;
 
 export type CreateResult =
   | { ok: true; worktree: WorktreeRecord }
   | { ok: false; code: AddErrorCode; error: string };
 
-export type RemoveOutcome =
-  | 'removed' | 'has-work' | 'not-ours' | 'absent' | 'left-behind';
+interface GitRun { code: number; stdout: string; stderr: string }
 
 /**
- * Execute git with an array argv, timeout, and buffer cap (#7).
- * Uses LC_ALL=C so error messages match English patterns regardless of locale.
+ * Run git, never throwing: the exit code is the decision every caller makes,
+ * and a thrown error is too easy to read as "probably fine". `LC_ALL=C` so the
+ * few messages classified by text are English whatever the machine's locale.
  */
-async function execGit(
-  cwd: string,
-  args: string[],
-  options?: { timeout?: number }
-): Promise<{ stdout: string; stderr: string }> {
-  try {
-    const { stdout, stderr } = await execFileAsync('git', args, {
+function runGit(cwd: string, args: string[], maxBuffer = 5 * 1024 * 1024): Promise<GitRun> {
+  return new Promise((resolve) => {
+    let exe: string;
+    try {
+      exe = gitExecutable();
+    } catch (err) {
+      resolve({ code: -1, stdout: '', stderr: (err as Error).message });
+      return;
+    }
+    execFile(exe, args, {
       cwd,
       windowsHide: true,
-      timeout: options?.timeout ?? 15_000,
-      maxBuffer: 5 * 1024 * 1024,
-      env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+      timeout: 30_000,
+      maxBuffer,
+      env: {
+        ...process.env,
+        LC_ALL: 'C',
+        LANG: 'C',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
+      },
+    }, (err, stdout, stderr) => {
+      const out = String(stdout ?? '');
+      const errText = String(stderr ?? '');
+      if (!err) {
+        resolve({ code: 0, stdout: out, stderr: errText });
+        return;
+      }
+      const code = typeof (err as NodeJS.ErrnoException & { code?: unknown }).code === 'number'
+        ? (err as unknown as { code: number }).code
+        : -1;
+      resolve({ code: code === 0 ? -1 : code, stdout: out, stderr: errText || err.message });
     });
-    return {
-      stdout: stdout ? stdout.toString() : '',
-      stderr: stderr ? stderr.toString() : '',
-    };
-  } catch (err: any) {
-    const stdout = err.stdout ? err.stdout.toString() : '';
-    const stderr = err.stderr ? err.stderr.toString() : (err.message || '');
-    const error: any = new Error(stderr || stdout || 'git command failed');
-    error.code = err.code;
-    error.stdout = stdout;
-    error.stderr = stderr;
-    throw error;
-  }
+  });
+}
+
+function isDirectory(dir: string): boolean {
+  try { return fs.statSync(dir).isDirectory(); } catch { return false; }
 }
 
 /**
- * Resolves the root of the main repository.
- * F1: Uses `git rev-parse --path-format=absolute --git-common-dir`, then `dirname`.
- * NEVER `--show-toplevel`: inside a worktree that returns the worktree (F1),
- * nesting worktrees and hashing against the wrong repo (#7).
+ * The root of the MAIN checkout: `--git-common-dir`, then its parent. Never
+ * `--show-toplevel`, which inside a worktree answers the worktree and would
+ * nest a new worktree inside another one (F1).
  */
 export async function repoRootFor(dir: string): Promise<string | null> {
-  if (!dir || typeof dir !== 'string') return null;
-  try {
-    const { stdout } = await execGit(dir, [
-      'rev-parse',
-      '--path-format=absolute',
-      '--git-common-dir',
-    ]);
-    const trimmed = stdout.trim();
-    if (!trimmed) return null;
-    return path.resolve(path.dirname(trimmed));
-  } catch {
-    return null;
-  }
+  if (!dir || typeof dir !== 'string' || !path.isAbsolute(dir) || !isDirectory(dir)) return null;
+  const res = await runGit(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const trimmed = res.code === 0 ? res.stdout.trim() : '';
+  if (!trimmed) return null;
+  return path.resolve(path.dirname(trimmed));
 }
 
 export async function probeRepo(dir: string): Promise<{ repoRoot: string; currentBranch: string } | null> {
   const root = await repoRootFor(dir);
   if (!root) return null;
-  try {
-    const { stdout } = await execGit(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
-    const currentBranch = stdout.trim();
-    return { repoRoot: root, currentBranch: currentBranch || 'HEAD' };
-  } catch {
-    return { repoRoot: root, currentBranch: 'HEAD' };
-  }
+  const res = await runGit(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const currentBranch = res.code === 0 ? res.stdout.trim() : '';
+  return { repoRoot: root, currentBranch: currentBranch || 'HEAD' };
 }
 
 /**
- * Resolves a base commit ref to its name and SHA.
- * F5: Uses `git rev-parse --verify --quiet <ref>^{commit}` and returns `{name, sha}`.
- * Never `check-ref-format` for a base — it rejects `HEAD~3`, which is legal (F5).
- * D6: Default ref HEAD. Records commit SHA because branch names move (#7).
+ * A base ref to its name and commit SHA (D6 — the name moves, the SHA does
+ * not). `isSafeRev` first: the ref lands in argv and must never read as an
+ * option. Not `check-ref-format`, which refuses the legal `HEAD~3` (F5).
  */
 export async function resolveBase(
   repoRoot: string,
-  ref?: string
+  ref?: string,
 ): Promise<{ name: string; sha: string } | null> {
   if (!repoRoot || typeof repoRoot !== 'string') return null;
-  const targetRef = ref && ref.trim() ? ref.trim() : 'HEAD';
+  const targetRef = ref?.trim() ? ref.trim() : 'HEAD';
+  if (!isSafeRev(targetRef)) return null;
+  const res = await runGit(repoRoot, ['rev-parse', '--verify', '--quiet', `${targetRef}^{commit}`]);
+  const sha = res.code === 0 ? res.stdout.trim() : '';
+  if (!/^[0-9a-f]{40,64}$/i.test(sha)) return null;
+  return { name: targetRef, sha };
+}
+
+// ─── Registry: what main created ─────────────────────────────────────────────
+
+/**
+ * `worktrees.json` beside the checkouts. The renderer's copy of a workspace's
+ * worktree metadata is for display only; every destructive operation reads the
+ * repository and branch from HERE, so a renderer (or a hand-edited
+ * session.json) can never point a removal or a `branch -D` somewhere else.
+ */
+export function registryPath(): string {
+  return path.join(worktreeRoot(), 'worktrees.json');
+}
+
+type Registry = Record<string, WorktreeRecord & { createdAt: number }>;
+
+function readRegistry(): Registry {
   try {
-    const { stdout } = await execGit(repoRoot, [
-      'rev-parse',
-      '--verify',
-      '--quiet',
-      `${targetRef}^{commit}`,
-    ]);
-    const sha = stdout.trim();
-    if (!sha) return null;
-    return { name: targetRef, sha };
+    const parsed = JSON.parse(fs.readFileSync(registryPath(), 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Registry : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-/**
- * Reads a worktree's `.git` file (`gitdir: <repo>/.git/worktrees/<n>`) and goes three levels up.
- * Returns null when the file is gone — which is the normal post-F2 state,
- * so callers must tolerate it (#7).
- */
-export async function parentRepoOf(worktreePath: string): Promise<string | null> {
-  if (!worktreePath || typeof worktreePath !== 'string') return null;
-  try {
-    const gitFilePath = path.join(worktreePath, '.git');
-    const stat = await fs.promises.stat(gitFilePath);
-    if (!stat.isFile()) return null;
-    const content = await fs.promises.readFile(gitFilePath, 'utf8');
-    const match = content.match(/^gitdir:\s*(.+)$/m);
-    if (!match) return null;
-    let gitDir = match[1].trim();
-    if (!path.isAbsolute(gitDir)) {
-      gitDir = path.resolve(worktreePath, gitDir);
-    }
-    // gitDir is <repo>/.git/worktrees/<name>; 3 levels up yields <repo>
-    return path.resolve(gitDir, '..', '..', '..');
-  } catch {
-    return null;
-  }
+function writeRegistry(reg: Registry): void {
+  const file = registryPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2), 'utf8');
+  fs.renameSync(tmp, file);
 }
 
-/**
- * Creates a new git worktree workspace.
- * Strict ordering (F5, D7, D8):
- * 1. isValidBranchName (whitelist check)
- * 2. repoRootFor (verify repo and find canonical root, F1)
- * 3. git check-ref-format --branch (authoritative branch name validation, D8)
- * 4. resolveBase (resolve base commit SHA, F5, D6)
- * 5. Refuse if target path exists on disk
- * 6. mkdir -p parent directory
- * 7. git worktree add -b <branch> <path> <baseSha>
- * On failure, runs `git worktree prune` and returns classified error (D7).
- */
-export async function createWorktree(i: {
-  repoRoot: string;
-  branch: string;
-  base?: string;
-}): Promise<CreateResult> {
-  if (!i || !isValidBranchName(i.branch)) {
-    return {
-      ok: false,
-      code: 'invalid_branch',
-      error: `Invalid branch name: ${i?.branch ?? ''}`,
-    };
-  }
+function samePath(a: string, b: string): boolean {
+  return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+}
 
-  const root = await repoRootFor(i.repoRoot);
-  if (!root) {
-    return {
-      ok: false,
-      code: 'not_a_repo',
-      error: 'Directory is not inside a git repository',
-    };
-  }
-
-  try {
-    await execGit(root, ['check-ref-format', '--branch', i.branch]);
-  } catch {
-    return {
-      ok: false,
-      code: 'invalid_branch',
-      error: `Git rejected branch name format: ${i.branch}`,
-    };
-  }
-
-  const base = await resolveBase(root, i.base);
-  if (!base) {
-    return {
-      ok: false,
-      code: 'git_failed',
-      error: `Failed to resolve base ref: ${i.base ?? 'HEAD'}`,
-    };
-  }
-
-  const slug = worktreeSlug(root, i.branch);
-  const targetPath = path.join(worktreeRoot(), slug);
-
-  if (fs.existsSync(targetPath)) {
-    return {
-      ok: false,
-      code: 'exists',
-      error: 'Worktree path already exists',
-    };
-  }
-
-  const parentDir = path.dirname(targetPath);
-  try {
-    await fs.promises.mkdir(parentDir, { recursive: true });
-  } catch (err: any) {
-    return {
-      ok: false,
-      code: 'git_failed',
-      error: err.message || 'Failed to create worktree directory',
-    };
-  }
-
-  const args = addArgs(targetPath, i.branch, base.sha);
-  try {
-    await execGit(root, args);
-  } catch (err: any) {
-    // Prune on failure: an add can fail with metadata half landed (#7)
-    try {
-      await execGit(root, pruneArgs());
-    } catch {
-      // ignore prune failure
-    }
-    const stderr = err.stderr || err.message || '';
-    let code = classifyAddError(stderr);
-    if (code === 'branch_exists') {
-      try {
-        const { stdout } = await execGit(root, ['worktree', 'list', '--porcelain']);
-        const needle = `branch refs/heads/${i.branch}`;
-        if (stdout.split('\n').some((line) => line.trim() === needle)) {
-          code = 'branch_in_use';
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return {
-      ok: false,
-      code,
-      error: stderr.trim() || err.message || 'git worktree add failed',
-    };
-  }
-
+/** The record main wrote when it created this worktree, or null. */
+export function lookupWorktree(worktreePath: string): WorktreeRecord | null {
+  if (typeof worktreePath !== 'string' || !worktreePath) return null;
+  const reg = readRegistry();
+  const key = worktreeKey(worktreePath);
+  const hit = reg[key] ?? Object.values(reg).find((r) => r && typeof r.worktreePath === 'string' && samePath(r.worktreePath, worktreePath));
+  if (!hit || !isValidBranchName(hit.branch) || typeof hit.repoRoot !== 'string') return null;
   return {
-    ok: true,
-    worktree: {
-      repoRoot: root,
-      branch: i.branch,
-      baseBranch: base.name,
-      baseSha: base.sha,
-      worktreePath: targetPath,
-    },
+    repoRoot: hit.repoRoot,
+    branch: hit.branch,
+    baseBranch: hit.baseBranch,
+    baseSha: hit.baseSha,
+    worktreePath: hit.worktreePath,
   };
 }
 
+function recordWorktree(rec: WorktreeRecord): void {
+  const reg = readRegistry();
+  reg[worktreeKey(rec.worktreePath)] = { ...rec, createdAt: Date.now() };
+  writeRegistry(reg);
+}
+
+function forgetWorktree(worktreePath: string): void {
+  const reg = readRegistry();
+  let changed = false;
+  for (const [key, rec] of Object.entries(reg)) {
+    if (key === worktreeKey(worktreePath) || (rec && typeof rec.worktreePath === 'string' && samePath(rec.worktreePath, worktreePath))) {
+      delete reg[key];
+      changed = true;
+    }
+  }
+  if (changed) writeRegistry(reg);
+}
+
+// ─── Create ──────────────────────────────────────────────────────────────────
+
+function fail(code: AddErrorCode, error: string): CreateResult {
+  return { ok: false, code, error };
+}
+
+async function classifyFailedAdd(root: string, branch: string, stderr: string): Promise<AddErrorCode> {
+  const code = classifyAddError(stderr);
+  if (code !== 'branch_exists') return code;
+  const list = await runGit(root, ['worktree', 'list', '--porcelain']);
+  const inUse = list.code === 0
+    && parseWorktreePorcelain(list.stdout).some((wt) => wt.branch === branch);
+  return inUse ? 'branch_in_use' : code;
+}
+
 /**
- * Removes a worktree workspace directory (#7).
- * F2: Never trusts git's exit code — git can return 0 while leaving the directory.
- * F3: Unforced by default — git checks for modified/untracked files atomically.
- * F4: Never deletes the branch.
- * D3: Single drain paid once before the single removal attempt; NO retry loop.
+ * Creates a worktree on a NEW branch. Order: whitelist, repo, git's own
+ * `check-ref-format --branch`, base validation and resolution, refuse an
+ * existing target, `git worktree add -b`, then record it in the registry.
  */
-export async function removeWorktree(
-  p: string,
-  o?: { force?: boolean; drainMs?: number }
-): Promise<RemoveOutcome> {
-  if (!isWmuxWorktreePath(worktreeRoot(), p)) {
-    return 'not-ours';
+export async function createWorktree(i: { repoRoot: string; branch: string; base?: string }): Promise<CreateResult> {
+  if (!i || !isValidBranchName(i.branch)) return fail('invalid_branch', 'Invalid branch name');
+  if (!isValidBaseRef(i.base)) return fail('invalid_base', 'Invalid base ref');
+
+  const root = await repoRootFor(i.repoRoot);
+  if (!root) return fail('not_a_repo', 'Directory is not inside a git repository');
+
+  const format = await runGit(root, ['check-ref-format', '--branch', i.branch]);
+  if (format.code !== 0) return fail('invalid_branch', 'Git rejected the branch name');
+
+  const base = await resolveBase(root, i.base);
+  if (!base) return fail('invalid_base', `Could not resolve base ref: ${i.base?.trim() || 'HEAD'}`);
+
+  const targetPath = path.join(worktreeRoot(), worktreeSlug(root, i.branch));
+  if (fs.existsSync(targetPath)) return fail('exists', 'Worktree path already exists');
+
+  try {
+    await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+  } catch (err) {
+    return fail('git_failed', (err as Error).message || 'Failed to create worktree directory');
   }
 
-  p = path.resolve(p);
+  const add = await runGit(root, addArgs(targetPath, i.branch, base.sha));
+  if (add.code !== 0) {
+    return fail(await classifyFailedAdd(root, i.branch, add.stderr), add.stderr.trim() || 'git worktree add failed');
+  }
 
-  // Read parent repo before git worktree remove, because git deletes .git file even if dir removal fails (F2)
-  const parent = await parentRepoOf(p);
+  const record: WorktreeRecord = {
+    repoRoot: root,
+    branch: i.branch,
+    baseBranch: base.name,
+    baseSha: base.sha,
+    worktreePath: targetPath,
+  };
+  try {
+    recordWorktree(record);
+  } catch (err) {
+    // The checkout exists and is the user's now; without a record wmux will
+    // simply never remove it. Say so rather than undo the add.
+    console.warn(`[worktree] registry write failed: ${(err as NodeJS.ErrnoException).code ?? 'UNKNOWN'}`);
+  }
+  return { ok: true, worktree: record };
+}
 
-  if (!fs.existsSync(p)) {
-    if (parent) {
-      try {
-        await execGit(parent, pruneArgs());
-      } catch {
-        // ignore
-      }
-    }
+// ─── Inspect / remove ────────────────────────────────────────────────────────
+
+type Vetted =
+  | { ok: true; record: WorktreeRecord; path: string; present: boolean }
+  | { ok: false; result: WorktreeRemoveResult };
+
+/**
+ * Every precondition for touching `p`, in the order that costs least:
+ * two-level layout, not a link, recorded by main, and listed by git for the
+ * recorded repository (and not that repository's primary checkout).
+ */
+/** A real directory, nothing at all, or something else (a link, a junction, a file). */
+function entryKind(target: string): 'dir' | 'absent' | 'other' {
+  try {
+    const st = fs.lstatSync(target);
+    return st.isDirectory() && !st.isSymbolicLink() ? 'dir' : 'other';
+  } catch {
     return 'absent';
   }
+}
 
-  const drainMs = o?.drainMs ?? PTY_EXIT_DRAIN_MS;
-  if (drainMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, drainMs));
+async function vetManagedWorktree(p: unknown): Promise<Vetted> {
+  if (typeof p !== 'string' || !isManagedWorktreePath(worktreeRoot(), p)) {
+    return { ok: false, result: { outcome: 'not-ours' } };
+  }
+  const target = path.resolve(p);
+  const entry = entryKind(target);
+  if (entry === 'other') return { ok: false, result: { outcome: 'not-ours' } };
+  const present = entry === 'dir';
+
+  const record = lookupWorktree(target);
+  if (!record) return { ok: false, result: { outcome: 'not-ours' } };
+  if (!isDirectory(record.repoRoot)) {
+    return { ok: false, result: { outcome: 'error', message: 'The repository this worktree belongs to was not found' } };
   }
 
-  let stderr = '';
-  if (parent) {
-    try {
-      const res = await execGit(parent, removeArgs(p, Boolean(o?.force)));
-      stderr = res.stderr;
-    } catch (err: any) {
-      stderr = err.stderr || err.message || '';
-    }
+  const list = await runGit(record.repoRoot, ['worktree', 'list', '--porcelain']);
+  if (list.code !== 0) {
+    return { ok: false, result: { outcome: 'error', message: firstLine(list.stderr) } };
   }
+  const key = worktreeKey(target);
+  const listed = parseWorktreePorcelain(list.stdout).find((wt) => worktreeKey(wt.path) === key);
+  if (!listed || listed.primary) return { ok: false, result: { outcome: 'not-ours' } };
+  return { ok: true, record, path: target, present };
+}
 
-  if (!o?.force && /contains modified or untracked files/.test(stderr)) {
-    return 'has-work';
-  }
+function firstLine(text: string): string {
+  return (text.split(/\r?\n/).find((l) => l.trim()) ?? 'git failed').replace(/^(fatal|error): /, '').trim();
+}
 
-  if (!fs.existsSync(p)) {
-    if (parent) {
-      try {
-        await execGit(parent, pruneArgs());
-      } catch {
-        // ignore
-      }
-    }
-    return 'removed';
-  }
-
-  // F2: Directory still present after git worktree remove. Best effort fs.rm fallback.
-  try {
-    await fs.promises.rm(p, {
-      recursive: true,
-      force: true,
-      maxRetries: 3,
-      retryDelay: 100,
-    });
-  } catch {
-    // ignore
-  }
-
-  if (parent) {
-    try {
-      await execGit(parent, pruneArgs());
-    } catch {
-      // ignore
-    }
-  }
-
-  return fs.existsSync(p) ? 'left-behind' : 'removed';
+async function countWork(worktreePath: string): Promise<{ count: number } | { error: string }> {
+  const status = await runGit(worktreePath, STATUS_ARGS, 64 * 1024 * 1024);
+  if (status.code !== 0) return { error: firstLine(status.stderr) };
+  return { count: countStatusEntries(status.stdout) };
 }
 
 /**
- * Deletes a branch by name after explicit discard confirmation (#7).
- * Never deletes branches automatically (D10).
- * Never logs paths (#174).
+ * Read-only pre-flight for the close dialog: is this a worktree wmux may
+ * remove, and does it hold anything Keep would refuse to lose? Runs while the
+ * workspace is still open, so a refusal costs the user nothing.
  */
-export async function deleteBranch(
-  repoRoot: string,
-  branch: string,
-  deps?: {
-    execFileAsync?: (file: string, args: string[], options: any) => Promise<any>;
-  }
-): Promise<{ ok: boolean; error?: string }> {
-  if (!isValidBranchName(branch)) {
-    return { ok: false, error: 'invalid branch name' };
-  }
-  const run = deps?.execFileAsync ?? execFileAsync;
+export async function inspectWorktree(p: unknown): Promise<WorktreeInspectResult> {
+  const vetted = await vetManagedWorktree(p);
+  if (!vetted.ok) return vetted.result.outcome === 'error'
+    ? { outcome: 'error', message: vetted.result.message }
+    : { outcome: 'not-ours' };
+  if (!vetted.present) return { outcome: 'absent' };
+  const work = await countWork(vetted.path);
+  if ('error' in work) return { outcome: 'error', message: work.error };
+  return work.count > 0 ? { outcome: 'has-work', count: work.count } : { outcome: 'clean' };
+}
+
+async function removeEmptyLeftover(dir: string, discard: boolean): Promise<boolean> {
+  if (!fs.existsSync(dir)) return true;
   try {
-    await run('git', ['branch', '-D', branch], { cwd: repoRoot, windowsHide: true });
-    return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err?.message || 'git branch -D failed' };
+    if (discard) {
+      await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    } else {
+      await fs.promises.rmdir(dir);
+    }
+  } catch {
+    // left behind: reported below
   }
+  return !fs.existsSync(dir);
 }
 
 /**
- * Scans the worktree root for unmanaged directories and reconciles them (D4).
- * Walks <root>/<repo>/<branch> two levels deep, skips anything in claimed.
- * Gathers three facts, calls classifyWorktreeDir:
- * - leftover    -> fs.rm
- * - unreachable -> kept, log (#174: no paths in log)
- * - live        -> removeWorktree(p, { force: false, drainMs: 0 })
+ * Removes a worktree wmux created.
+ *
+ * - `keep`: refuses with `has-work` if `status --ignored --untracked-files=all`
+ *   lists anything, then an UNFORCED `git worktree remove`. The branch stays.
+ * - `discard`: `git worktree remove --force`, then `git branch -D` of the
+ *   branch main recorded — only after the removal succeeded.
+ *
+ * Never a recursive delete after a git failure: any non-zero exit is
+ * `left-behind` with the directory as git left it.
  */
-export async function reconcileOrphans(
-  claimed: string[]
-): Promise<Array<{ outcome: RemoveOutcome | 'kept' }>> {
-  const root = worktreeRoot();
-  if (!fs.existsSync(root)) return [];
+export async function removeWorktree(
+  p: unknown,
+  o: { mode: WorktreeCloseMode; drainMs?: number },
+): Promise<WorktreeRemoveResult> {
+  const mode = o?.mode;
+  if (mode !== 'keep' && mode !== 'discard') return { outcome: 'error', message: 'invalid mode' };
 
-  const claimedSet = new Set((claimed || []).map((c) => path.resolve(c).toLowerCase()));
-  const results: Array<{ outcome: RemoveOutcome | 'kept' }> = [];
+  const vetted = await vetManagedWorktree(p);
+  if (!vetted.ok) return vetted.result;
+  if (!vetted.present) return { outcome: 'absent' };
+  const { record, path: target } = vetted;
 
-  let repoDirs: string[];
-  try {
-    repoDirs = await fs.promises.readdir(root);
-  } catch {
-    return [];
-  }
+  await drain(o.drainMs ?? WORKTREE_CLOSE_DRAIN_MS);
 
-  for (const repoDir of repoDirs) {
-    const repoDirPath = path.join(root, repoDir);
-    let repoStat: fs.Stats;
-    try {
-      repoStat = await fs.promises.stat(repoDirPath);
-    } catch {
-      continue;
-    }
-    if (!repoStat.isDirectory()) continue;
-
-    let subEntries: string[];
-    try {
-      subEntries = await fs.promises.readdir(repoDirPath);
-    } catch {
-      continue;
-    }
-
-    // Check if repoDirPath is itself an empty leftover directory (e.g. at level 1)
-    if (subEntries.length === 0) {
-      const resolvedRepo = path.resolve(repoDirPath);
-      if (claimedSet.has(resolvedRepo.toLowerCase())) continue;
-      const classification = classifyWorktreeDir({
-        hasGitFile: false,
-        isEmpty: true,
-        gitAnswered: false,
-      });
-      if (classification === 'leftover') {
-        try {
-          await fs.promises.rm(repoDirPath, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 100,
-          });
-        } catch {
-          // ignore
-        }
-        results.push({ outcome: fs.existsSync(repoDirPath) ? 'left-behind' : 'removed' });
-      }
-      continue;
-    }
-
-    // Two levels deep: <root>/<repo>/<branch>
-    for (const branchDir of subEntries) {
-      const p = path.join(repoDirPath, branchDir);
-      let pStat: fs.Stats;
-      try {
-        pStat = await fs.promises.stat(p);
-      } catch {
-        continue;
-      }
-      if (!pStat.isDirectory()) continue;
-
-      const resolvedP = path.resolve(p);
-      if (claimedSet.has(resolvedP.toLowerCase())) {
-        continue;
-      }
-
-      let hasGitFile: boolean;
-      try {
-        const gitStat = await fs.promises.stat(path.join(p, '.git'));
-        hasGitFile = gitStat.isFile();
-      } catch {
-        hasGitFile = false;
-      }
-
-      let isEmpty: boolean;
-      try {
-        const entries = await fs.promises.readdir(p);
-        isEmpty = entries.length === 0;
-      } catch {
-        isEmpty = false;
-      }
-
-      let gitAnswered = false;
-      if (hasGitFile) {
-        try {
-          await execGit(p, ['rev-parse', '--git-dir']);
-          gitAnswered = true;
-        } catch {
-          gitAnswered = false;
-        }
-      }
-
-      const classification = classifyWorktreeDir({ hasGitFile, isEmpty, gitAnswered });
-
-      if (classification === 'leftover') {
-        try {
-          await fs.promises.rm(p, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 100,
-          });
-        } catch {
-          // ignore
-        }
-        results.push({ outcome: fs.existsSync(p) ? 'left-behind' : 'removed' });
-      } else if (classification === 'unreachable') {
-        // #174: Do not include paths in main log
-        console.warn('[worktree] keeping unreachable worktree directory');
-        results.push({ outcome: 'kept' });
-      } else {
-        // live
-        const outcome = await removeWorktree(p, { force: false, drainMs: 0 });
-        results.push({ outcome });
-      }
-    }
-
-    // Optional tidy: if repo directory is now empty, prune it
-    try {
-      const remaining = await fs.promises.readdir(repoDirPath);
-      if (remaining.length === 0) {
-        await fs.promises.rmdir(repoDirPath);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return results;
+  const removal = mode === 'discard' ? await forceRemove(record, target) : await keepRemove(record, target);
+  if (removal) return removal;
+  forgetWorktree(target);
+  return mode === 'discard' ? deleteRecordedBranch(record) : { outcome: 'removed', branchDeleted: false };
 }
+
+function drain(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+/** Discard's second half: the branch MAIN recorded, never one the renderer named. */
+async function deleteRecordedBranch(record: WorktreeRecord): Promise<WorktreeRemoveResult> {
+  const branch = await runGit(record.repoRoot, ['branch', '-D', record.branch]);
+  return branch.code === 0
+    ? { outcome: 'removed', branchDeleted: true }
+    : { outcome: 'removed', branchDeleted: false, message: firstLine(branch.stderr) };
+}
+
+/** Keep: re-check for work now that the shells are gone, then an unforced
+ *  remove. Null when the directory is gone; otherwise why it stays. */
+async function keepRemove(record: WorktreeRecord, target: string): Promise<WorktreeRemoveResult | null> {
+  const work = await countWork(target);
+  if ('error' in work) return { outcome: 'error', message: work.error };
+  if (work.count > 0) return { outcome: 'has-work', count: work.count };
+
+  const removed = await runGit(record.repoRoot, removeArgs(target, false));
+  if (removed.code !== 0) {
+    return /modified or untracked files/i.test(removed.stderr)
+      ? { outcome: 'has-work' }
+      : { outcome: 'left-behind', message: firstLine(removed.stderr) };
+  }
+  // git exited 0 for this exact path: only an EMPTY leftover may go.
+  return (await removeEmptyLeftover(target, false)) ? null : { outcome: 'left-behind' };
+}
+
+/** Discard: the user confirmed destroying everything in the checkout. */
+async function forceRemove(record: WorktreeRecord, target: string): Promise<WorktreeRemoveResult | null> {
+  const removed = await runGit(record.repoRoot, removeArgs(target, true));
+  if (removed.code !== 0) return { outcome: 'left-behind', message: firstLine(removed.stderr) };
+  // git exited 0 for this exact path: only now may a leftover directory go.
+  return (await removeEmptyLeftover(target, true)) ? null : { outcome: 'left-behind' };
+}
+
+// ─── Restore ─────────────────────────────────────────────────────────────────
 
 function findSplitLeaves(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
   if (node.type === 'leaf') return [node];
-  if (Array.isArray(node.children)) {
-    return node.children.flatMap(findSplitLeaves);
-  }
+  if (Array.isArray(node.children)) return node.children.flatMap(findSplitLeaves);
   return [];
 }
 
-/**
- * Finds the surfaceId of the active surface or first terminal surface in a splitTree.
- */
-export function findNoticeSurfaceId(tree: any): string | undefined {
-  const leaves = findSplitLeaves(tree);
-  if (leaves.length === 0) return undefined;
+const isTerminalSurface = (s: any): boolean =>
+  !!s && (s.type === 'terminal' || !s.type) && typeof s.id === 'string';
 
-  // 1. Try to find an active terminal surface in the first leaf that has surfaces
-  for (const leaf of leaves) {
-    if (!Array.isArray(leaf.surfaces) || leaf.surfaces.length === 0) continue;
-    const activeIdx = typeof leaf.activeSurfaceIndex === 'number' ? leaf.activeSurfaceIndex : 0;
-    const active = leaf.surfaces[activeIdx] ?? leaf.surfaces[0];
-    if (active && (active.type === 'terminal' || !active.type) && typeof active.id === 'string') {
-      return active.id;
-    }
-  }
-
-  // 2. Try to find the first terminal surface anywhere in the tree
-  for (const leaf of leaves) {
-    if (!Array.isArray(leaf.surfaces)) continue;
-    for (const surface of leaf.surfaces) {
-      if (surface && (surface.type === 'terminal' || !surface.type) && typeof surface.id === 'string') {
-        return surface.id;
-      }
-    }
-  }
-
-  // 3. Fall back to the active surface (or first surface) of the first leaf that has surfaces
-  for (const leaf of leaves) {
-    if (!Array.isArray(leaf.surfaces) || leaf.surfaces.length === 0) continue;
-    const activeIdx = typeof leaf.activeSurfaceIndex === 'number' ? leaf.activeSurfaceIndex : 0;
-    const active = leaf.surfaces[activeIdx] ?? leaf.surfaces[0];
-    if (active && typeof active.id === 'string') {
-      return active.id;
-    }
-  }
-
-  return undefined;
+function activeSurfaceOf(leaf: any): any {
+  if (!Array.isArray(leaf.surfaces) || leaf.surfaces.length === 0) return undefined;
+  const idx = typeof leaf.activeSurfaceIndex === 'number' ? leaf.activeSurfaceIndex : 0;
+  return leaf.surfaces[idx] ?? leaf.surfaces[0];
 }
 
+/** The surface a restore notice should be written to: an active terminal,
+ *  else any terminal, else any active surface. */
+export function findNoticeSurfaceId(tree: any): string | undefined {
+  const leaves = findSplitLeaves(tree);
+  const activeTerminal = leaves.map(activeSurfaceOf).find(isTerminalSurface);
+  if (activeTerminal) return activeTerminal.id;
+  for (const leaf of leaves) {
+    const terminal = Array.isArray(leaf.surfaces) ? leaf.surfaces.find(isTerminalSurface) : undefined;
+    if (terminal) return terminal.id;
+  }
+  const anyActive = leaves.map(activeSurfaceOf).find((s) => s && typeof s.id === 'string');
+  return anyActive?.id;
+}
+
+/** The i18n key of the restore notice; translated by the renderer. */
+export const WORKTREE_MISSING_NOTICE_KEY = 'worktree.restoreMissing';
+
 /**
- * Verifies claimed worktree directories on restore (T12).
- * If a directory no longer exists on disk:
- * - Clears the workspace's worktree field so it does not keep claiming a phantom worktree.
- * - Delivers a pane notice to inform the user that it fell back to the home directory.
- * - Logs counts only, never paths (#174).
+ * A restored workspace whose worktree directory is gone loses its binding and
+ * says so in a pane. Logs counts only, never paths (#174). Never removes
+ * anything: a directory that is merely unreachable right now is not touched.
  */
 export function verifyRestoredWorktrees(
   windows: Array<{ workspaces?: Array<{ worktree?: WorktreeMetadata; splitTree?: any; [key: string]: any }> }>,
   deps?: {
     existsSync?: (p: string) => boolean;
-    showNotice?: (surfaceId: string, text: string) => void;
+    showNotice?: (surfaceId: string, key: string) => void;
   },
 ): { verified: number; cleared: number } {
   const exists = deps?.existsSync ?? fs.existsSync;
   let verified = 0;
   let cleared = 0;
-
   for (const win of windows || []) {
     for (const ws of win.workspaces || []) {
-      if (ws.worktree?.worktreePath) {
-        if (!exists(ws.worktree.worktreePath)) {
-          delete ws.worktree;
-          cleared++;
-          const surfaceId = findNoticeSurfaceId(ws.splitTree);
-          if (surfaceId && deps?.showNotice) {
-            deps.showNotice(surfaceId, 'Worktree directory was deleted; fell back to home directory');
-          }
-        } else {
-          verified++;
-        }
+      if (!ws.worktree?.worktreePath) continue;
+      if (exists(ws.worktree.worktreePath)) {
+        verified++;
+        continue;
       }
+      delete ws.worktree;
+      cleared++;
+      const surfaceId = findNoticeSurfaceId(ws.splitTree);
+      if (surfaceId) deps?.showNotice?.(surfaceId, WORKTREE_MISSING_NOTICE_KEY);
     }
   }
-
   if (cleared > 0) {
     console.log(`[worktree-verify] cleared ${cleared} missing worktree(s), verified ${verified}`);
   }
-
   return { verified, cleared };
 }

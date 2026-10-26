@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import * as os from 'os';
-import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult } from '../shared/types';
+import { IPC_CHANNELS, type InsertionResult, type NotificationSoundPickResult, type UpdateTriggerResult,
+  type WorktreeCloseMode, type WorktreeInspectResult, type WorktreeRemoveResult,
+} from '../shared/types';
 import type { BrowserHistory } from '../shared/browser-history';
 import type {
   RemoteConsoleBridge,
@@ -510,14 +512,17 @@ contextBridge.exposeInMainWorld('wmux', {
     isFrameless: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_FRAMELESS),
     relaunch: () => ipcRenderer.send(IPC_CHANNELS.WINDOW_RELAUNCH),
   },
+  // Git worktree workspaces (#366). `remove` names a path and a mode and
+  // nothing else: main reads the repository and branch from its own record of
+  // what it created, so there is no "delete this branch" call to abuse.
   worktree: {
     create: (repoDir: string, branch: string, base?: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_CREATE, repoDir, branch, base),
-    remove: (worktreePath: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_REMOVE, worktreePath),
+    inspect: (worktreePath: string): Promise<WorktreeInspectResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_INSPECT, worktreePath),
+    remove: (worktreePath: string, mode: WorktreeCloseMode): Promise<WorktreeRemoveResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_REMOVE, worktreePath, mode),
     probe: (dir: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_WORKTREE_PROBE, dir),
-    deleteBranch: (repoRoot: string, branch: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_DELETE_BRANCH, repoRoot, branch),
   },
 });

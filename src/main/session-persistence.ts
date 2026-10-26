@@ -45,8 +45,12 @@ export interface SessionData {
       explorerWidth?: number;
       explorerExpanded?: Record<string, string[]>;
       explorerShowHidden?: boolean;
-      // Carried in the auto-session so the workspace re-attaches to its worktree
-      // on restart; explicitly omitted from named sessions and snapshots (§5.4).
+      // Which wmux-created worktree this workspace is (#366). Carried through
+      // EVERY copy — auto-session, the version-change Auto-backup, named
+      // sessions, snapshots — because a restore that drops it turns a live
+      // checkout into an anonymous folder. Nothing sweeps on the strength of a
+      // missing binding any more, but the [WT] identity and the close dialog
+      // depend on it surviving an update.
       worktree?: WorktreeMetadata;
     }>;
   }>;
@@ -170,7 +174,7 @@ function backupAutoSession(previousVersion: string): void {
         explorerWidth: w.explorerWidth,
         explorerExpanded: w.explorerExpanded,
         explorerShowHidden: w.explorerShowHidden,
-        // worktree is deliberately omitted (§5.4): named sessions are templates, and a template carrying an exclusive live resource is how two workspaces claim one checkout.
+        worktree: w.worktree,
       })),
       sidebarWidth: windows[0]?.sidebarWidth ?? 260,
     };
@@ -456,7 +460,7 @@ export function writeSessionSnapshot(data: SessionData, at: number = Date.now())
         explorerWidth: w.explorerWidth,
         explorerExpanded: w.explorerExpanded,
         explorerShowHidden: w.explorerShowHidden,
-        // worktree is deliberately omitted (§5.4): snapshots are restore points / templates, which must not carry exclusive worktrees.
+        worktree: w.worktree,
       })),
       sidebarWidth: windows[0]?.sidebarWidth ?? 260,
     };

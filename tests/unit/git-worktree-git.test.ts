@@ -1,18 +1,18 @@
 /**
- * Integration tests against a real repository on disk (#7).
+ * Integration tests against real repositories on disk (#366).
  *
- * Tests the impure functions in `src/main/git-worktree.ts` against real temporary
- * git repositories created on disk using `fs.mkdtempSync(path.join(os.tmpdir(), 'wmux-wt-git-'))`.
+ * LOCALAPPDATA is pointed at a temp dir, so the worktree root and main's
+ * registry (`worktrees.json`) are sandboxed; every git call is real.
  *
- * Pins:
- * - F1: `repoRootFor` resolves main repository root, never the worktree path.
- * - F2: `removeWorktree` verifies filesystem presence; locked directories report 'left-behind'.
- * - F3: Unforced removal refuses modified or untracked files with 'has-work'.
- * - F4: Worktree removal preserves the branch and its commits.
- * - F5: `resolveBase` resolves 'HEAD~1' to { name, sha }; rejects '-rf' and unknown refs.
- * - D7: Existing uncheckout branch -> 'branch_exists'; branch in use -> 'branch_in_use'.
- * - D4: `reconcileOrphans` removes empty leftovers; keeps unreachable populated worktrees.
- * - Claimed worktrees are never touched by `reconcileOrphans`.
+ * Pins the safety rules of `src/main/git-worktree.ts`:
+ * - F1: `repoRootFor` resolves the main checkout, never the worktree.
+ * - Keep refuses (`has-work`) on modified, untracked AND ignored files — an
+ *   unforced `git worktree remove` deletes ignored files with exit 0.
+ * - A git failure never ends in a recursive delete (`left-behind`).
+ * - Only a registered path exactly two levels under the root, listed by git,
+ *   is ever touched; anything else is `not-ours` and stays on disk.
+ * - Discard deletes the branch MAIN recorded, after a successful removal.
+ * - F5: base refs are resolved to SHAs; an option-shaped base is refused.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync, spawn } from 'child_process';
@@ -24,17 +24,35 @@ import {
   resolveBase,
   createWorktree,
   removeWorktree,
-  reconcileOrphans,
+  inspectWorktree,
+  lookupWorktree,
   worktreeRoot,
   probeRepo,
 } from '../../src/main/git-worktree';
+import { gitExecutable } from '../../src/main/git-view';
 
-let hasGit = false;
+// The same absolute git the module under test runs.
+let GIT = '';
 try {
-  execFileSync('git', ['--version'], { stdio: 'ignore', windowsHide: true });
-  hasGit = true;
+  GIT = gitExecutable();
 } catch {
-  hasGit = false;
+  GIT = '';
+}
+const hasGit = GIT !== '';
+
+const NO_DRAIN = { drainMs: 0 } as const;
+
+function gitIn(cwd: string, args: string[]): string {
+  return execFileSync(GIT, args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+}
+
+function branchExists(repo: string, branch: string): boolean {
+  try {
+    gitIn(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_000 }, () => {
@@ -43,54 +61,46 @@ describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_0
   let savedLocalAppData: string | undefined;
   let savedWmuxInstance: string | undefined;
 
+  async function make(branch: string, base?: string): Promise<string> {
+    const res = await createWorktree({ repoRoot: mainRepo, branch, base });
+    if (!res.ok) throw new Error(`createWorktree(${branch}) failed: ${res.code} ${res.error}`);
+    return res.worktree.worktreePath;
+  }
+
   beforeAll(() => {
     savedLocalAppData = process.env.LOCALAPPDATA;
     savedWmuxInstance = process.env.WMUX_INSTANCE;
 
     tempBase = fs.mkdtempSync(path.join(os.tmpdir(), 'wmux-wt-git-'));
-    // Isolate worktree root to tempBase
     process.env.LOCALAPPDATA = tempBase;
     process.env.WMUX_INSTANCE = 'test-git';
 
     mainRepo = path.join(tempBase, 'main-repo');
     fs.mkdirSync(mainRepo, { recursive: true });
-
-    // Initialize main repository with branch 'main'
     try {
-      execFileSync('git', ['init', '-b', 'main'], { cwd: mainRepo, windowsHide: true });
+      gitIn(mainRepo, ['init', '-b', 'main']);
     } catch {
-      execFileSync('git', ['init'], { cwd: mainRepo, windowsHide: true });
-      execFileSync('git', ['checkout', '-b', 'main'], { cwd: mainRepo, windowsHide: true });
+      gitIn(mainRepo, ['init']);
+      gitIn(mainRepo, ['checkout', '-b', 'main']);
     }
+    gitIn(mainRepo, ['config', 'user.name', 'wmux Tester']);
+    gitIn(mainRepo, ['config', 'user.email', 'wmux-tester@example.com']);
 
-    execFileSync('git', ['config', 'user.name', 'wmux Tester'], { cwd: mainRepo, windowsHide: true });
-    execFileSync('git', ['config', 'user.email', 'wmux-tester@example.com'], { cwd: mainRepo, windowsHide: true });
-
-    // Commit 1
+    fs.writeFileSync(path.join(mainRepo, '.gitignore'), '.env\n');
     fs.writeFileSync(path.join(mainRepo, 'file.txt'), 'line 1\n');
-    execFileSync('git', ['add', 'file.txt'], { cwd: mainRepo, windowsHide: true });
-    execFileSync('git', ['commit', '-m', 'Initial commit (c1)'], { cwd: mainRepo, windowsHide: true });
+    gitIn(mainRepo, ['add', '.gitignore', 'file.txt']);
+    gitIn(mainRepo, ['commit', '-m', 'Initial commit (c1)']);
 
-    // Commit 2 (so HEAD~1 exists)
     fs.writeFileSync(path.join(mainRepo, 'file.txt'), 'line 1\nline 2\n');
-    execFileSync('git', ['add', 'file.txt'], { cwd: mainRepo, windowsHide: true });
-    execFileSync('git', ['commit', '-m', 'Second commit (c2)'], { cwd: mainRepo, windowsHide: true });
+    gitIn(mainRepo, ['add', 'file.txt']);
+    gitIn(mainRepo, ['commit', '-m', 'Second commit (c2)']);
   });
 
   afterAll(async () => {
-    // Restore environment
-    if (savedLocalAppData !== undefined) {
-      process.env.LOCALAPPDATA = savedLocalAppData;
-    } else {
-      delete process.env.LOCALAPPDATA;
-    }
-
-    if (savedWmuxInstance !== undefined) {
-      process.env.WMUX_INSTANCE = savedWmuxInstance;
-    } else {
-      delete process.env.WMUX_INSTANCE;
-    }
-
+    if (savedLocalAppData !== undefined) process.env.LOCALAPPDATA = savedLocalAppData;
+    else delete process.env.LOCALAPPDATA;
+    if (savedWmuxInstance !== undefined) process.env.WMUX_INSTANCE = savedWmuxInstance;
+    else delete process.env.WMUX_INSTANCE;
     if (tempBase && fs.existsSync(tempBase)) {
       try {
         await fs.promises.rm(tempBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
@@ -100,259 +110,266 @@ describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_0
     }
   });
 
-  describe('F1 — repoRootFor returns main repository root, never worktree path', () => {
-    it('returns main repository root from inside a linked worktree', async () => {
-      const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-f1' });
-      expect(res.ok).toBe(true);
-      if (!res.ok) return;
-
-      const wtPath = res.worktree.worktreePath;
-      const rootFromWt = await repoRootFor(wtPath);
-      const rootFromMain = await repoRootFor(mainRepo);
-
-      expect(rootFromWt).not.toBeNull();
-      expect(rootFromMain).not.toBeNull();
-      expect(rootFromWt!.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
-      expect(rootFromWt!.toLowerCase()).not.toBe(path.resolve(wtPath).toLowerCase());
-      expect(rootFromMain!.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
-
-      await removeWorktree(wtPath, { force: true, drainMs: 0 });
+  describe('F1 — repoRootFor returns the main checkout, never the worktree', () => {
+    it('returns the main repository root from inside a linked worktree', async () => {
+      const wtPath = await make('feat-f1');
+      expect((await repoRootFor(wtPath))!.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      expect((await repoRootFor(mainRepo))!.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      expect((await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('removed');
     });
 
-    it('returns null for a directory that is not inside a git repository', async () => {
+    it('returns null outside a repository, and for a relative path', async () => {
       const nonRepo = path.join(tempBase, 'empty-dir');
       fs.mkdirSync(nonRepo, { recursive: true });
       expect(await repoRootFor(nonRepo)).toBeNull();
+      expect(await repoRootFor('main-repo')).toBeNull();
     });
 
     it('probeRepo returns repoRoot and branch, or null for non-repo', async () => {
       const probe = await probeRepo(mainRepo);
-      expect(probe).not.toBeNull();
       expect(probe!.repoRoot.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
       expect(probe!.currentBranch).toBe('main');
-
-      const nonRepo = path.join(tempBase, 'empty-dir');
-      expect(await probeRepo(nonRepo)).toBeNull();
+      expect(await probeRepo(path.join(tempBase, 'empty-dir'))).toBeNull();
     });
   });
 
-  describe('F2 — removeWorktree verifies filesystem presence against locked directories', () => {
-    it('returns left-behind when a child process holds the worktree as CWD', async () => {
-      const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-f2-lock' });
+  describe('createWorktree records what main created', () => {
+    it('writes a registry record with repo, branch and base SHA', async () => {
+      const wtPath = await make('feat-registry', 'HEAD~1');
+      const rec = lookupWorktree(wtPath)!;
+      expect(rec).not.toBeNull();
+      expect(rec.branch).toBe('feat-registry');
+      expect(rec.baseBranch).toBe('HEAD~1');
+      expect(rec.baseSha).toBe(gitIn(mainRepo, ['rev-parse', 'HEAD~1']));
+      expect(rec.repoRoot.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      // The checkout sits exactly two levels under the root.
+      expect(path.relative(worktreeRoot(), wtPath).split(path.sep)).toHaveLength(2);
+      await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
+      expect(lookupWorktree(wtPath)).toBeNull();
+    });
+
+    it('refuses a base ref that starts with "-" before running git', async () => {
+      for (const base of ['-rf', '--upload-pack=calc', '--output=x']) {
+        const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-dash-base', base });
+        expect(res.ok).toBe(false);
+        if (!res.ok) expect(res.code).toBe('invalid_base');
+      }
+      expect(branchExists(mainRepo, 'feat-dash-base')).toBe(false);
+    });
+
+    it('refuses a branch name that starts with "-"', async () => {
+      const res = await createWorktree({ repoRoot: mainRepo, branch: '-D' });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.code).toBe('invalid_branch');
+    });
+  });
+
+  describe('Keep never loses work', () => {
+    it('keeps a worktree holding only an IGNORED file (.env), and the file', async () => {
+      const wtPath = await make('feat-keep-ignored');
+      const envFile = path.join(wtPath, '.env');
+      fs.writeFileSync(envFile, 'SECRET=1\n');
+      // git itself calls this clean — which is why Keep must not trust it.
+      expect(gitIn(wtPath, ['status', '--porcelain'])).toBe('');
+
+      expect(await inspectWorktree(wtPath)).toEqual({ outcome: 'has-work', count: 1 });
+      const res = await removeWorktree(wtPath, { mode: 'keep', ...NO_DRAIN });
+      expect(res).toEqual({ outcome: 'has-work', count: 1 });
+      expect(fs.readFileSync(envFile, 'utf8')).toBe('SECRET=1\n');
+      expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(true);
+    });
+
+    it('keeps a worktree with a modified tracked file', async () => {
+      const wtPath = await make('feat-keep-mod');
+      const tracked = path.join(wtPath, 'file.txt');
+      fs.appendFileSync(tracked, 'agent modifications\n');
+      const res = await removeWorktree(wtPath, { mode: 'keep', ...NO_DRAIN });
+      expect(res.outcome).toBe('has-work');
+      expect(fs.readFileSync(tracked, 'utf8')).toContain('agent modifications');
+    });
+
+    it('keeps a worktree with an untracked file in a subfolder', async () => {
+      const wtPath = await make('feat-keep-untracked');
+      fs.mkdirSync(path.join(wtPath, 'notes'));
+      const untracked = path.join(wtPath, 'notes', 'todo.txt');
+      fs.writeFileSync(untracked, 'secret agent notes\n');
+      const res = await removeWorktree(wtPath, { mode: 'keep', ...NO_DRAIN });
+      expect(res).toEqual({ outcome: 'has-work', count: 1 });
+      expect(fs.existsSync(untracked)).toBe(true);
+    });
+
+    it('removes a clean worktree and keeps its branch and commits', async () => {
+      const wtPath = await make('feat-keep-clean');
+      fs.writeFileSync(path.join(wtPath, 'work.txt'), 'agent committed content\n');
+      gitIn(wtPath, ['add', 'work.txt']);
+      gitIn(wtPath, ['commit', '-m', 'Agent commit on branch']);
+      const commitSha = gitIn(mainRepo, ['rev-parse', 'feat-keep-clean']);
+
+      expect(await inspectWorktree(wtPath)).toEqual({ outcome: 'clean' });
+      const res = await removeWorktree(wtPath, { mode: 'keep', ...NO_DRAIN });
+      expect(res).toEqual({ outcome: 'removed', branchDeleted: false });
+      expect(fs.existsSync(wtPath)).toBe(false);
+      expect(gitIn(mainRepo, ['rev-parse', '--verify', 'feat-keep-clean'])).toBe(commitSha);
+    });
+  });
+
+  describe('a git failure never deletes', () => {
+    it('Discard of a LOCKED worktree reports left-behind and leaves every file', async () => {
+      const wtPath = await make('feat-locked');
+      const work = path.join(wtPath, 'precious.txt');
+      fs.writeFileSync(work, 'uncommitted work\n');
+      gitIn(mainRepo, ['worktree', 'lock', wtPath]);
+
+      const res = await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
+      expect(res.outcome).toBe('left-behind');
+      expect(fs.readFileSync(work, 'utf8')).toBe('uncommitted work\n');
+      expect(branchExists(mainRepo, 'feat-locked')).toBe(true);
+
+      gitIn(mainRepo, ['worktree', 'unlock', wtPath]);
+      await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
+    });
+
+    it('Keep of a clean LOCKED worktree reports left-behind and leaves the checkout', async () => {
+      const wtPath = await make('feat-locked-keep');
+      gitIn(mainRepo, ['worktree', 'lock', wtPath]);
+      const res = await removeWorktree(wtPath, { mode: 'keep', ...NO_DRAIN });
+      expect(res.outcome).toBe('left-behind');
+      expect(fs.existsSync(path.join(wtPath, 'file.txt'))).toBe(true);
+      gitIn(mainRepo, ['worktree', 'unlock', wtPath]);
+      await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
+    });
+
+    it('a worktree whose repository is gone is an error, never a delete', async () => {
+      const otherRepo = path.join(tempBase, 'doomed-repo');
+      fs.mkdirSync(otherRepo);
+      gitIn(otherRepo, ['init']);
+      gitIn(otherRepo, ['config', 'user.name', 't']);
+      gitIn(otherRepo, ['config', 'user.email', 't@example.com']);
+      fs.writeFileSync(path.join(otherRepo, 'a.txt'), 'a\n');
+      gitIn(otherRepo, ['add', 'a.txt']);
+      gitIn(otherRepo, ['commit', '-m', 'a']);
+      const res = await createWorktree({ repoRoot: otherRepo, branch: 'orphaned' });
       expect(res.ok).toBe(true);
       if (!res.ok) return;
-
       const wtPath = res.worktree.worktreePath;
+      fs.rmSync(otherRepo, { recursive: true, force: true });
 
-      // Spawn a background node process whose CWD is the worktree path (locking it on Windows)
+      for (const mode of ['keep', 'discard'] as const) {
+        const out = await removeWorktree(wtPath, { mode, ...NO_DRAIN });
+        expect(out.outcome).toBe('error');
+        expect(fs.existsSync(path.join(wtPath, 'a.txt'))).toBe(true);
+      }
+    });
+
+    it.runIf(process.platform === 'win32')('a shell holding the folder as cwd leaves it behind, never force-deleted', async () => {
+      const wtPath = await make('feat-cwd-held');
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
         cwd: wtPath,
         stdio: 'ignore',
         windowsHide: true,
       });
+      await new Promise((r) => setTimeout(r, 200));
+      try {
+        const res = await removeWorktree(wtPath, { mode: 'keep', ...NO_DRAIN });
+        expect(res.outcome).toBe('left-behind');
+        expect(fs.existsSync(wtPath)).toBe(true);
+      } finally {
+        child.kill();
+        await new Promise((resolve) => child.on('exit', resolve));
+      }
+    });
+  });
 
-      // Allow the process a moment to initialize and acquire the CWD lock
-      await new Promise((r) => setTimeout(r, 150));
+  describe('only what main created, where main put it', () => {
+    it('refuses the root, the repo-slug level and deeper paths', async () => {
+      const wtPath = await make('feat-layout');
+      for (const p of [worktreeRoot(), path.dirname(wtPath), path.join(wtPath, 'sub')]) {
+        expect((await removeWorktree(p, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('not-ours');
+        expect(await inspectWorktree(p)).toEqual({ outcome: 'not-ours' });
+      }
+      expect(fs.existsSync(path.join(wtPath, 'file.txt'))).toBe(true);
+      await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
+    });
 
-      const outcome = await removeWorktree(wtPath, { force: false, drainMs: 0 });
-      // On Windows, the locked directory cannot be removed and must report 'left-behind'
-      expect(outcome).toBe('left-behind');
-      expect(fs.existsSync(wtPath)).toBe(true);
+    it('refuses a real git worktree OUTSIDE the root, and the main checkout', async () => {
+      const external = path.join(tempBase, 'external-worktree');
+      gitIn(mainRepo, ['worktree', 'add', '-b', 'feat-external', external, 'HEAD']);
+      expect((await removeWorktree(external, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('not-ours');
+      expect((await removeWorktree(mainRepo, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('not-ours');
+      expect(fs.existsSync(path.join(external, 'file.txt'))).toBe(true);
+      expect(branchExists(mainRepo, 'feat-external')).toBe(true);
+      gitIn(mainRepo, ['worktree', 'remove', '--force', external]);
+    });
 
-      // Kill the child holding the lock
-      child.kill();
-      await new Promise((resolve) => child.on('exit', resolve));
+    it('refuses an unregistered worktree that sits in the right place', async () => {
+      const unregistered = path.join(worktreeRoot(), 'main-repo', 'hand-made-12345678');
+      gitIn(mainRepo, ['worktree', 'add', '-b', 'feat-hand-made', unregistered, 'HEAD']);
+      expect((await removeWorktree(unregistered, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('not-ours');
+      expect(fs.existsSync(path.join(unregistered, 'file.txt'))).toBe(true);
+      expect(branchExists(mainRepo, 'feat-hand-made')).toBe(true);
+      gitIn(mainRepo, ['worktree', 'remove', '--force', unregistered]);
+    });
 
-      // After releasing the lock, directory can be pruned
-      await fs.promises.rm(wtPath, { recursive: true, force: true });
+    it('refuses a registered path git no longer lists as a worktree', async () => {
+      const wtPath = await make('feat-unlisted');
+      // Detach it from git behind wmux's back: the admin entry goes, the folder stays.
+      fs.rmSync(path.join(mainRepo, '.git', 'worktrees', path.basename(wtPath)), { recursive: true, force: true });
+      fs.writeFileSync(path.join(wtPath, 'loose.txt'), 'still mine\n');
+      expect((await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('not-ours');
+      expect(fs.existsSync(path.join(wtPath, 'loose.txt'))).toBe(true);
+    });
+  });
+
+  describe('Discard', () => {
+    it('force-removes the worktree with its work and deletes the recorded branch', async () => {
+      const wtPath = await make('feat-discard');
+      fs.writeFileSync(path.join(wtPath, '.env'), 'X=1\n');
+      fs.writeFileSync(path.join(wtPath, 'scratch.txt'), 'throwaway\n');
+      const res = await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
+      expect(res).toEqual({ outcome: 'removed', branchDeleted: true });
       expect(fs.existsSync(wtPath)).toBe(false);
+      expect(branchExists(mainRepo, 'feat-discard')).toBe(false);
+    });
+
+    it('an unknown mode is refused without touching anything', async () => {
+      const wtPath = await make('feat-bad-mode');
+      const res = await removeWorktree(wtPath, { mode: 'force' as never, ...NO_DRAIN });
+      expect(res.outcome).toBe('error');
+      expect(fs.existsSync(path.join(wtPath, 'file.txt'))).toBe(true);
+      await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });
     });
   });
 
-  describe('F3 — unforced removeWorktree preserves modified or untracked files', () => {
-    it('returns has-work and leaves worktree untouched when tracked file is modified', async () => {
-      const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-f3-mod' });
-      expect(res.ok).toBe(true);
-      if (!res.ok) return;
-
-      const wtPath = res.worktree.worktreePath;
-      const trackedFile = path.join(wtPath, 'file.txt');
-      fs.appendFileSync(trackedFile, 'agent modifications\n');
-
-      const outcome = await removeWorktree(wtPath, { force: false, drainMs: 0 });
-      expect(outcome).toBe('has-work');
-      expect(fs.existsSync(wtPath)).toBe(true);
-      expect(fs.readFileSync(trackedFile, 'utf8')).toContain('agent modifications');
-      expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(true);
-
-      // Clean up with force
-      const forceOutcome = await removeWorktree(wtPath, { force: true, drainMs: 0 });
-      expect(forceOutcome).toBe('removed');
-    });
-
-    it('returns has-work and leaves worktree untouched when untracked file is present', async () => {
-      const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-f3-untracked' });
-      expect(res.ok).toBe(true);
-      if (!res.ok) return;
-
-      const wtPath = res.worktree.worktreePath;
-      const untrackedFile = path.join(wtPath, 'untracked.txt');
-      fs.writeFileSync(untrackedFile, 'secret agent notes\n');
-
-      const outcome = await removeWorktree(wtPath, { force: false, drainMs: 0 });
-      expect(outcome).toBe('has-work');
-      expect(fs.existsSync(wtPath)).toBe(true);
-      expect(fs.existsSync(untrackedFile)).toBe(true);
-      expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(true);
-
-      // Clean up with force
-      const forceOutcome = await removeWorktree(wtPath, { force: true, drainMs: 0 });
-      expect(forceOutcome).toBe('removed');
-    });
-  });
-
-  describe('F4 — clean removal preserves branch and commit reachability', () => {
-    it('removes worktree directory while branch and commit remain in repository', async () => {
-      const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-f4-preserve' });
-      expect(res.ok).toBe(true);
-      if (!res.ok) return;
-
-      const wtPath = res.worktree.worktreePath;
-      fs.writeFileSync(path.join(wtPath, 'work.txt'), 'agent committed content\n');
-      execFileSync('git', ['add', 'work.txt'], { cwd: wtPath, windowsHide: true });
-      execFileSync('git', ['commit', '-m', 'Agent commit on branch'], { cwd: wtPath, windowsHide: true });
-
-      const commitSha = execFileSync('git', ['rev-parse', 'feat-f4-preserve'], {
-        cwd: mainRepo,
-        encoding: 'utf8',
-        windowsHide: true,
-      }).trim();
-
-      const outcome = await removeWorktree(wtPath, { force: false, drainMs: 0 });
-      expect(outcome).toBe('removed');
-      expect(fs.existsSync(wtPath)).toBe(false);
-
-      // Branch still exists and points to commitSha
-      const branchSha = execFileSync('git', ['rev-parse', '--verify', 'feat-f4-preserve'], {
-        cwd: mainRepo,
-        encoding: 'utf8',
-        windowsHide: true,
-      }).trim();
-      expect(branchSha).toBe(commitSha);
-
-      // Commit is still reachable in object database
-      expect(() =>
-        execFileSync('git', ['cat-file', '-e', commitSha], { cwd: mainRepo, windowsHide: true })
-      ).not.toThrow();
-    });
-  });
-
-  describe('F5 — resolveBase resolves commits and rejects option injections / invalid refs', () => {
-    it('resolves HEAD~1 to name and full 40-character commit sha', async () => {
+  describe('F5 — resolveBase', () => {
+    it('resolves HEAD~1 to its name and full SHA', async () => {
       const base = await resolveBase(mainRepo, 'HEAD~1');
-      expect(base).not.toBeNull();
-      expect(base!.name).toBe('HEAD~1');
-
-      const expectedSha = execFileSync('git', ['rev-parse', 'HEAD~1'], {
-        cwd: mainRepo,
-        encoding: 'utf8',
-        windowsHide: true,
-      }).trim();
-      expect(base!.sha).toBe(expectedSha);
+      expect(base).toEqual({ name: 'HEAD~1', sha: gitIn(mainRepo, ['rev-parse', 'HEAD~1']) });
     });
 
     it('defaults to HEAD when ref is omitted', async () => {
       const base = await resolveBase(mainRepo);
-      expect(base).not.toBeNull();
-      expect(base!.name).toBe('HEAD');
-
-      const expectedSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-        cwd: mainRepo,
-        encoding: 'utf8',
-        windowsHide: true,
-      }).trim();
-      expect(base!.sha).toBe(expectedSha);
+      expect(base).toEqual({ name: 'HEAD', sha: gitIn(mainRepo, ['rev-parse', 'HEAD']) });
     });
 
-    it('returns null for option injections like -rf', async () => {
-      const base = await resolveBase(mainRepo, '-rf');
-      expect(base).toBeNull();
-    });
-
-    it('returns null for unknown refs', async () => {
-      const base = await resolveBase(mainRepo, 'non-existent-ref-xyz123');
-      expect(base).toBeNull();
+    it('returns null for option injections and unknown refs', async () => {
+      expect(await resolveBase(mainRepo, '-rf')).toBeNull();
+      expect(await resolveBase(mainRepo, '--all')).toBeNull();
+      expect(await resolveBase(mainRepo, 'non-existent-ref-xyz123')).toBeNull();
     });
   });
 
-  describe('D7 — createWorktree branch existence and branch in use error codes', () => {
-    it('returns branch_exists when branch exists but is not checked out', async () => {
-      execFileSync('git', ['branch', 'existing-idle-branch'], { cwd: mainRepo, windowsHide: true });
-
+  describe('D7 — branch existence and branch in use', () => {
+    it('returns branch_exists when the branch exists but is not checked out', async () => {
+      gitIn(mainRepo, ['branch', 'existing-idle-branch']);
       const res = await createWorktree({ repoRoot: mainRepo, branch: 'existing-idle-branch' });
       expect(res.ok).toBe(false);
-      if (!res.ok) {
-        expect(res.code).toBe('branch_exists');
-      }
+      if (!res.ok) expect(res.code).toBe('branch_exists');
     });
 
-    it('returns branch_in_use when branch is checked out in main repository', async () => {
+    it('returns branch_in_use when the branch is checked out in the main checkout', async () => {
       const res = await createWorktree({ repoRoot: mainRepo, branch: 'main' });
       expect(res.ok).toBe(false);
-      if (!res.ok) {
-        expect(res.code).toBe('branch_in_use');
-      }
-    });
-
-    it('returns branch_in_use when branch is checked out in an existing worktree', async () => {
-      const extWt = path.join(tempBase, 'external-worktree');
-      execFileSync('git', ['worktree', 'add', '-b', 'feat-d7-inuse', extWt, 'HEAD'], {
-        cwd: mainRepo,
-        windowsHide: true,
-      });
-
-      const res = await createWorktree({ repoRoot: mainRepo, branch: 'feat-d7-inuse' });
-      expect(res.ok).toBe(false);
-      if (!res.ok) {
-        expect(res.code).toBe('branch_in_use');
-      }
-
-      execFileSync('git', ['worktree', 'remove', '--force', extWt], { cwd: mainRepo, windowsHide: true });
-    });
-  });
-
-  describe('D4 — reconcileOrphans sweeps leftovers and keeps unreachable directories', () => {
-    it('removes empty leftover directory without .git under worktree root', async () => {
-      const emptyDir = path.join(worktreeRoot(), 'orphan-repo', 'empty-leftover');
-      fs.mkdirSync(emptyDir, { recursive: true });
-      expect(fs.existsSync(emptyDir)).toBe(true);
-
-      const outcomes = await reconcileOrphans([]);
-      expect(outcomes).toContainEqual({ outcome: 'removed' });
-      expect(fs.existsSync(emptyDir)).toBe(false);
-    });
-
-    it('keeps unreachable directory with files whose parent repo was deleted', async () => {
-      const unreachableDir = path.join(worktreeRoot(), 'deleted-repo', 'populated-dir');
-      fs.mkdirSync(unreachableDir, { recursive: true });
-      const preservedFile = path.join(unreachableDir, 'agent-work.txt');
-      fs.writeFileSync(preservedFile, 'valuable unsaved agent work\n');
-
-      const outcomes = await reconcileOrphans([]);
-      expect(outcomes).toContainEqual({ outcome: 'kept' });
-      expect(fs.existsSync(unreachableDir)).toBe(true);
-      expect(fs.existsSync(preservedFile)).toBe(true);
-    });
-
-    it('never touches a path included in claimed parameter', async () => {
-      const claimedEmptyDir = path.join(worktreeRoot(), 'claimed-repo', 'empty-claimed');
-      fs.mkdirSync(claimedEmptyDir, { recursive: true });
-      expect(fs.existsSync(claimedEmptyDir)).toBe(true);
-
-      const outcomes = await reconcileOrphans([claimedEmptyDir]);
-      expect(fs.existsSync(claimedEmptyDir)).toBe(true);
-      // Ensure claimed directory was not removed
-      expect(outcomes).not.toContainEqual({ outcome: 'removed' });
+      if (!res.ok) expect(res.code).toBe('branch_in_use');
     });
   });
 });

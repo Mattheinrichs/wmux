@@ -52,14 +52,22 @@ describe('worktree preload bridge', () => {
     );
   });
 
-  it('forwards remove with worktreePath', async () => {
-    electron.invoke.mockResolvedValue({ ok: true });
-    await bridge.worktree.remove('C:\\Users\\user\\.wmux\\worktrees\\slug');
+  it('forwards remove with the path AND the explicit mode (Discard is wired through)', async () => {
+    electron.invoke.mockResolvedValue({ outcome: 'removed' });
+    await bridge.worktree.remove('C:\\wt\\repo\\slug', 'discard');
+    expect(electron.invoke).toHaveBeenCalledWith(IPC_CHANNELS.GIT_WORKTREE_REMOVE, 'C:\\wt\\repo\\slug', 'discard');
+    await bridge.worktree.remove('C:\\wt\\repo\\slug', 'keep');
+    expect(electron.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.GIT_WORKTREE_REMOVE, 'C:\\wt\\repo\\slug', 'keep');
+  });
 
-    expect(electron.invoke).toHaveBeenCalledWith(
-      IPC_CHANNELS.GIT_WORKTREE_REMOVE,
-      'C:\\Users\\user\\.wmux\\worktrees\\slug',
-    );
+  it('forwards inspect with the path', async () => {
+    electron.invoke.mockResolvedValue({ outcome: 'clean' });
+    await bridge.worktree.inspect('C:\\wt\\repo\\slug');
+    expect(electron.invoke).toHaveBeenCalledWith(IPC_CHANNELS.GIT_WORKTREE_INSPECT, 'C:\\wt\\repo\\slug');
+  });
+
+  it('exposes no branch-deletion call', () => {
+    expect(bridge.worktree.deleteBranch).toBeUndefined();
   });
 
   it('forwards probe with directory', async () => {

@@ -930,7 +930,7 @@ export const fr: Translation = {
   'settings.remote.pair.loopbackWarn': 'wmux n’écoute que sur cet ordinateur et aucune URL publique n’est définie : cette adresse ne s’ouvrira pas telle quelle sur un téléphone. Rendez-la d’abord accessible :',
   'settings.remote.pair.paired': 'Associé : {name}',
   'settings.remote.pair.close': 'Fermer',
-  // Git worktree workspaces (issue #7)
+  // Git worktree workspaces (#366)
   'sidebar.newWorktreeWorkspace': 'Nouvel espace de travail worktree…',
   'worktreeModal.title': 'Nouvel espace de travail worktree',
   'worktreeModal.branchLabel': 'Nom de branche',
@@ -951,4 +951,19 @@ export const fr: Translation = {
   'worktreeClose.keep': 'Conserver la branche',
   'worktreeClose.discard': 'Supprimer',
   'worktreeClose.cancel': 'Annuler',
+  'worktreeClose.checking': 'Vérification du dossier du worktree…',
+  'worktreeClose.clean': "Le dossier ne contient aucun fichier modifié, non suivi ou ignoré. Conserver la branche supprime le dossier ; la branche '{branch}' reste dans le dépôt.",
+  'worktreeClose.hasWork': 'Le dossier contient {count} fichier(s) modifié(s), non suivi(s) ou ignoré(s), par exemple .env ou une configuration locale. Il ne sera pas supprimé : fermer le laisse sur le disque.',
+  'worktreeClose.checkFailed': "wmux n'a pas pu vérifier ce worktree ({error}). Fermer laisse le dossier sur le disque.",
+  'worktreeClose.notOurs': "wmux n'a pas de trace de la création de ce dossier et ne le supprimera pas. Fermer le laisse sur le disque.",
+  'worktreeClose.absent': "Le dossier du worktree n'existe plus.",
+  'worktreeClose.discardWarning': "Supprimer efface de force le dossier et la branche '{branch}' : les modifications non commitées, les fichiers ignorés (.env, configuration locale) et les commits non fusionnés dans une autre branche sont détruits.",
+  'worktreeClose.closeKeepFolder': 'Fermer, garder le dossier',
+  'worktreeClose.result.removed': "Worktree '{branch}' supprimé ; la branche a été conservée.",
+  'worktreeClose.result.discarded': "Le worktree '{branch}' et sa branche ont été supprimés.",
+  'worktreeClose.result.branchKept': "Worktree '{branch}' supprimé, mais sa branche n'a pas pu être supprimée : {error}",
+  'worktreeClose.result.leftBehind': "Le dossier du worktree '{branch}' a été laissé sur le disque : {error}",
+  'worktreeClose.result.hasWork': "Le dossier du worktree '{branch}' a été laissé sur le disque : il contient {count} fichier(s) modifié(s), non suivi(s) ou ignoré(s).",
+  'worktree.badgeTitle': 'Worktree : {branch} (base : {base})',
+  'worktree.restoreMissing': "[wmux] Le dossier du worktree de cet espace n'existe plus ; le shell a démarré dans un autre dossier.",
 };

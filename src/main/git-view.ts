@@ -339,9 +339,11 @@ let gitExeMemo: string | null = null;
  * An ABSOLUTE git, resolved once. A bare `git` would be looked up by the OS at
  * every spawn, so a writeable directory early on PATH — the current folder
  * included, on Windows — decides what runs. Re-validated on use so an
- * uninstall or a Git update that moves it re-resolves.
+ * uninstall or a Git update that moves it re-resolves. Exported because
+ * `git-worktree.ts` runs git in a folder the user picked and needs the same
+ * guarantee: a `git.exe` committed to that repo must never be what runs.
  */
-function gitExecutable(): string {
+export function gitExecutable(): string {
   if (gitExeMemo && fs.existsSync(gitExeMemo)) return gitExeMemo;
   gitExeMemo = gitCandidates(process.env).find((c) => {
     try { return fs.statSync(c).isFile(); } catch { return false; }

@@ -24,7 +24,7 @@ import {
   teardownAgentBrowser,
   withDeadline,
 } from './agent-browser-runtime';
-import { reconcileOrphans, verifyRestoredWorktrees } from './git-worktree';
+import { verifyRestoredWorktrees } from './git-worktree';
 import { handleBridgeV2 } from './v2-bridge';
 import { distributeAgents, PaneLoadInfo } from './agent-manager';
 import {
@@ -1398,11 +1398,12 @@ function pruneRestoredQwenSessions(windows: SavedWindow[]): void {
 }
 
 /**
- * Delivers a notice to a surface's pane across all windows.
- * Attaches a did-finish-load listener if a window is still loading so startup notices are not lost.
+ * Delivers a translated notice (an i18n KEY, never English text) to a
+ * surface's pane across all windows. Attaches a did-finish-load listener if a
+ * window is still loading so startup notices are not lost.
  */
-function deliverPaneNotice(surfaceId: string, text: string): void {
-  const script = `window.__wmux_paneNotice?.(${JSON.stringify(surfaceId)}, ${JSON.stringify(text)}) === true`;
+function deliverPaneNotice(surfaceId: string, key: string): void {
+  const script = `window.__wmux_paneNoticeKey?.(${JSON.stringify(surfaceId)}, ${JSON.stringify(key)}) === true`;
   const deliverToWindow = (win: BrowserWindow) => {
     if (win.isDestroyed()) return;
     if (win.webContents.isLoading()) {
@@ -1571,30 +1572,6 @@ app.whenReady().then(() => {
   reconcileOrphanSessions(agentBrowserTeardownDeps).catch((err: Error) => {
     console.warn('[wmux] agent-browser session reconcile failed:', err?.message);
   });
-
-  // Collect abandoned worktrees left behind by crashes or abrupt exits (PR 1 §7.1 T11).
-  // Read the claim list from loadSession() — not from the windows — as ground
-  // truth for what will be live so slow window loads cannot race and cause an
-  // active worktree to be swept (brief §7.1 T11). Unawaited so startup never
-  // blocks on git worktree operations (issue #176). Log counts and error codes
-  // only; never log filesystem paths (issue #174).
-  const claimed = (loadSession()?.windows ?? [])
-    .flatMap((w) => w.workspaces ?? [])
-    .map((w) => w.worktree?.worktreePath)
-    .filter((p): p is string => !!p);
-  reconcileOrphans(claimed)
-    .then((outcomes) => {
-      const removed = outcomes.filter((o) => o.outcome === 'removed').length;
-      const kept = outcomes.filter((o) => o.outcome === 'kept' || o.outcome === 'has-work' || o.outcome === 'left-behind').length;
-      if (removed > 0 || kept > 0) {
-        console.log(`[worktree] startup sweep: ${removed} removed, ${kept} kept`);
-        logDiagnostic('worktree-reconcile', { removed, kept });
-      }
-    })
-    .catch((err: NodeJS.ErrnoException) => {
-      console.warn(`[worktree] startup sweep failed: ${err?.code ?? 'UNKNOWN'}`);
-      logDiagnostic('worktree-reconcile-error', { code: err?.code ?? 'UNKNOWN' });
-    });
 
   // Clear stale session data on version change (clean start for upgrades/fresh installs)
   const previousVersion = savedVersion();

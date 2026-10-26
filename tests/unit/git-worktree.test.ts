@@ -4,13 +4,14 @@ import {
   isValidBranchName,
   worktreeSlug,
   slugSegment,
-  isWmuxWorktreePath,
+  isManagedWorktreePath,
+  isValidBaseRef,
   worktreeRoot,
   addArgs,
   removeArgs,
-  pruneArgs,
   classifyAddError,
-  classifyWorktreeDir,
+  countStatusEntries,
+  STATUS_ARGS,
   SLUG_MAX,
 } from '../../src/main/git-worktree';
 
@@ -77,19 +78,47 @@ describe('git-worktree pure functions', () => {
     });
   });
 
-  describe('isWmuxWorktreePath', () => {
+  describe('isManagedWorktreePath: exactly <root>/<repo-slug>/<branch-dir>', () => {
     const root = worktreeRoot();
 
-    it('returns false for paths outside or equal to root', () => {
-      expect(isWmuxWorktreePath(root, path.join(root, '..', 'wt-other', 'x'))).toBe(false);
-      expect(isWmuxWorktreePath(root, path.join(root, '..', 'wt', '..', '..', 'x'))).toBe(false);
-      expect(isWmuxWorktreePath(root, root)).toBe(false);
-      expect(isWmuxWorktreePath(root, '')).toBe(false);
+    it('refuses the root, the repo-slug level, anything deeper, outside or relative', () => {
+      expect(isManagedWorktreePath(root, root)).toBe(false);
+      expect(isManagedWorktreePath(root, path.join(root, 'repo'))).toBe(false);
+      expect(isManagedWorktreePath(root, path.join(root, 'repo', 'br-1', 'sub'))).toBe(false);
+      expect(isManagedWorktreePath(root, path.join(root, '..', 'wt-other', 'x'))).toBe(false);
+      expect(isManagedWorktreePath(root, path.join(root, '..', '..', 'x', 'y'))).toBe(false);
+      expect(isManagedWorktreePath(root, 'repo/br-1')).toBe(false);
+      expect(isManagedWorktreePath(root, '')).toBe(false);
     });
 
-    it('returns true for valid worktree path inside root', () => {
-      const validPath = path.join(root, 'repo', 'br-abc12345');
-      expect(isWmuxWorktreePath(root, validPath)).toBe(true);
+    it('accepts a path two levels under the root', () => {
+      expect(isManagedWorktreePath(root, path.join(root, 'repo', 'br-abc12345'))).toBe(true);
+    });
+  });
+
+  describe('isValidBaseRef', () => {
+    it('accepts omitted, HEAD, branches, HEAD~3 and hashes', () => {
+      for (const ref of [undefined, '', 'HEAD', 'main', 'origin/main', 'HEAD~3', 'abc1234']) {
+        expect(isValidBaseRef(ref)).toBe(true);
+      }
+    });
+
+    it('refuses anything that could read as an option, a range or a non-string', () => {
+      for (const ref of ['-rf', '--output=x', '--upload-pack=calc', 'a..b', 'HEAD:file', 'a b', 42, null]) {
+        expect(isValidBaseRef(ref)).toBe(false);
+      }
+    });
+  });
+
+  describe('countStatusEntries', () => {
+    it('counts modified, untracked and ignored entries, a rename once', () => {
+      expect(countStatusEntries('')).toBe(0);
+      expect(countStatusEntries(' M a.txt\0?? b.txt\0!! .env\0')).toBe(3);
+      expect(countStatusEntries('R  new.txt\0old.txt\0 M c\0')).toBe(2);
+    });
+
+    it('asks git for ignored and every untracked file', () => {
+      expect(STATUS_ARGS).toEqual(expect.arrayContaining(['--ignored', '--untracked-files=all']));
     });
   });
 
@@ -116,10 +145,6 @@ describe('git-worktree pure functions', () => {
         'abc1234',
       ]);
     });
-
-    it('pruneArgs matches expected array', () => {
-      expect(pruneArgs()).toEqual(['worktree', 'prune']);
-    });
   });
 
   describe('classifyAddError', () => {
@@ -136,24 +161,5 @@ describe('git-worktree pure functions', () => {
       expect(classifyAddError("some unknown error")).toBe('git_failed');
       expect(classifyAddError('')).toBe('git_failed');
     });
-  });
-
-  describe('classifyWorktreeDir (8 boolean combinations)', () => {
-    const cases = [
-      { hasGitFile: false, isEmpty: true, gitAnswered: true, expected: 'leftover' },
-      { hasGitFile: false, isEmpty: true, gitAnswered: false, expected: 'leftover' },
-      { hasGitFile: false, isEmpty: false, gitAnswered: true, expected: 'unreachable' },
-      { hasGitFile: false, isEmpty: false, gitAnswered: false, expected: 'unreachable' },
-      { hasGitFile: true, isEmpty: true, gitAnswered: true, expected: 'live' },
-      { hasGitFile: true, isEmpty: true, gitAnswered: false, expected: 'unreachable' },
-      { hasGitFile: true, isEmpty: false, gitAnswered: true, expected: 'live' },
-      { hasGitFile: true, isEmpty: false, gitAnswered: false, expected: 'unreachable' },
-    ];
-
-    for (const c of cases) {
-      it(`combination { hasGitFile: ${c.hasGitFile}, isEmpty: ${c.isEmpty}, gitAnswered: ${c.gitAnswered} } -> ${c.expected}`, () => {
-        expect(classifyWorktreeDir(c)).toBe(c.expected);
-      });
-    }
   });
 });

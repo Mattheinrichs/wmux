@@ -455,7 +455,7 @@ describe('explorer panel state persistence', () => {
   });
 });
 
-describe('worktree metadata persistence (§5.4)', () => {
+describe('worktree metadata persistence (#366)', () => {
   const APPDATA_OVERRIDE = path.join(os.tmpdir(), 'wmux-worktree-session-test-' + process.pid);
   let mod: typeof import('../../src/main/session-persistence');
   let savedAppData: string | undefined;
@@ -509,7 +509,9 @@ describe('worktree metadata persistence (§5.4)', () => {
     expect(ws.worktree).toEqual(sampleWorktree);
   });
 
-  it('strips worktree metadata in backupAutoSession across version changes', () => {
+  // Every update restores from this backup: dropping the binding there is what
+  // let the old startup sweep remove live worktrees.
+  it('keeps worktree metadata in backupAutoSession across version changes', () => {
     mod.handleVersionChange('1.0.0');
     const data: SessionData = {
       version: 1,
@@ -537,10 +539,10 @@ describe('worktree metadata persistence (§5.4)', () => {
     const backup = mod.loadNamedSession(name)!;
     expect(backup).not.toBeNull();
     expect(backup.workspaces[0].title).toBe('wt-workspace');
-    expect((backup.workspaces[0] as any).worktree).toBeUndefined();
+    expect((backup.workspaces[0] as any).worktree).toEqual(sampleWorktree);
   });
 
-  it('strips worktree metadata in writeSessionSnapshot', () => {
+  it('keeps worktree metadata in writeSessionSnapshot', () => {
     const data: SessionData = {
       version: 1,
       windows: [{
@@ -566,6 +568,6 @@ describe('worktree metadata persistence (§5.4)', () => {
     const snapshot = mod.loadNamedSession(name!)!;
     expect(snapshot).not.toBeNull();
     expect(snapshot.workspaces[0].title).toBe('wt-workspace');
-    expect((snapshot.workspaces[0] as any).worktree).toBeUndefined();
+    expect((snapshot.workspaces[0] as any).worktree).toEqual(sampleWorktree);
   });
 });

@@ -49,8 +49,8 @@ import { getRemoteConsole } from './remote-console';
 import type { RemoteConsoleRuntime } from './remote-console/contract';
 import type { RemoteModesResult, RemoteSnapshotResult } from '../shared/remote-console-config';
 import { getChangedFiles, getFileDiff, getChangedFilesWithBaseline } from './diff-provider';
-import { createWorktree, removeWorktree, probeRepo, deleteBranch } from './git-worktree';
-import { handleGitView } from './git-view';
+import { createWorktree, removeWorktree, probeRepo, inspectWorktree } from './git-worktree';
+import { handleGitView, isSafeRev } from './git-view';
 import type { GitViewRequest } from '../shared/git-view';
 import {
   readMarkdownFile,
@@ -1253,16 +1253,20 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
 
   // Diff viewer handlers
   // Fallback: prefer process.cwd() (often the project dir) over USERPROFILE (never a git repo)
+  // `baseRef` is a worktree workspace's base commit (#366). It lands in git's
+  // argv, so anything that is not one safe revision is dropped, not passed.
+  const diffBaseRef = (baseRef: unknown): string | undefined =>
+    isSafeRev(baseRef) ? baseRef : undefined;
   ipcMain.handle(IPC_CHANNELS.DIFF_GET_FILES, async (_event, cwd: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const ref = typeof baseRef === 'string' && baseRef.trim() ? baseRef.trim() : undefined;
+    const ref = diffBaseRef(baseRef);
     const files = await getChangedFiles(resolvedCwd, ref);
     return { files };
   });
 
   ipcMain.handle(IPC_CHANNELS.DIFF_GET_DIFF, async (_event, cwd: string, file: string, baseRef?: unknown) => {
     const resolvedCwd = cwd || process.cwd();
-    const ref = typeof baseRef === 'string' && baseRef.trim() ? baseRef.trim() : undefined;
+    const ref = diffBaseRef(baseRef);
     const diff = await getFileDiff(resolvedCwd, file, ref);
     return { diff };
   });
@@ -1557,7 +1561,9 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
     },
   );
 
-  // Git worktree workspaces (#7)
+  // Git worktree workspaces (#366). Removal takes a PATH and a mode, nothing
+  // else: main reads the repository and branch from its own registry, so the
+  // renderer cannot name a branch to delete or a directory to remove.
   ipcMain.handle(
     IPC_CHANNELS.GIT_WORKTREE_CREATE,
     async (_event, repoDir: unknown, branch: unknown, base: unknown) => {
@@ -1566,31 +1572,37 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
         typeof branch !== 'string' ||
         (base !== undefined && typeof base !== 'string')
       ) {
-        return { ok: false, error: 'invalid_argument', message: 'Invalid argument types' };
+        return { ok: false, code: 'invalid_argument', error: 'Invalid argument types' };
       }
       try {
         return await createWorktree({ repoRoot: repoDir, branch, base });
-      } catch (err: any) {
-        return { ok: false, error: 'spawn_failed', message: (err as Error).message };
+      } catch (err) {
+        return { ok: false, code: 'git_failed', error: (err as Error).message };
       }
     },
   );
 
+  ipcMain.handle(IPC_CHANNELS.GIT_WORKTREE_INSPECT, async (_event, worktreePath: unknown) => {
+    try {
+      return await inspectWorktree(worktreePath);
+    } catch (err) {
+      return { outcome: 'error', message: (err as Error).message };
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.GIT_WORKTREE_REMOVE,
-    async (_event, worktreePath: unknown) => {
-      if (typeof worktreePath !== 'string') {
-        console.warn('[worktree] remove failed: invalid_argument');
-        return 'refused_not_wmux';
+    async (_event, worktreePath: unknown, mode: unknown) => {
+      if (mode !== 'keep' && mode !== 'discard') {
+        return { outcome: 'error', message: 'invalid mode' };
       }
       try {
-        const outcome = await removeWorktree(worktreePath);
-        if (outcome !== 'removed') {
-          console.warn(`[worktree] remove failed: ${outcome}`);
-        }
-        return outcome;
-      } catch {
-        return 'left_behind';
+        const result = await removeWorktree(worktreePath, { mode });
+        // Outcome only — never the path (#174).
+        if (result.outcome !== 'removed') console.warn(`[worktree] ${mode} close: ${result.outcome}`);
+        return result;
+      } catch (err) {
+        return { outcome: 'error', message: (err as Error).message };
       }
     },
   );
@@ -1598,24 +1610,12 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
   ipcMain.handle(
     IPC_CHANNELS.GIT_WORKTREE_PROBE,
     async (_event, dir: unknown) => {
-      if (typeof dir !== 'string') {
-        return null;
-      }
+      if (typeof dir !== 'string') return null;
       try {
         return await probeRepo(dir);
       } catch {
         return null;
       }
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.WORKTREE_DELETE_BRANCH,
-    async (_event, repoRoot: unknown, branch: unknown) => {
-      if (typeof repoRoot !== 'string' || typeof branch !== 'string') {
-        return { ok: false, error: 'invalid arguments' };
-      }
-      return deleteBranch(repoRoot, branch);
     },
   );
 

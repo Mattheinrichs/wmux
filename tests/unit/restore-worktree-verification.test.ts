@@ -73,7 +73,7 @@ describe('verifyRestoredWorktrees', () => {
     expect(showNotice).toHaveBeenCalledTimes(1);
     expect(showNotice).toHaveBeenCalledWith(
       'surf-term-1',
-      'Worktree directory was deleted; fell back to home directory',
+      'worktree.restoreMissing',
     );
   });
 
@@ -129,7 +129,7 @@ describe('verifyRestoredWorktrees', () => {
     expect(result).toEqual({ verified: 0, cleared: 1 });
     expect(showNotice).toHaveBeenCalledWith(
       'surf-nested-1',
-      'Worktree directory was deleted; fell back to home directory',
+      'worktree.restoreMissing',
     );
   });
 
@@ -162,7 +162,7 @@ describe('verifyRestoredWorktrees', () => {
     expect(result).toEqual({ verified: 0, cleared: 1 });
     expect(showNotice).toHaveBeenCalledWith(
       'surf-terminal-2',
-      'Worktree directory was deleted; fell back to home directory',
+      'worktree.restoreMissing',
     );
   });
 
