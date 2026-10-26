@@ -98,6 +98,11 @@ export function getSurfaceLabel(
     }
     case 'prompts':
       return t('surfaceLabel.prompts', 'Prompts');
+    case 'git': {
+      const folder = surface.cwd ? cwdFolderName(surface.cwd) : null;
+      const label = t('surfaceLabel.git', 'Git');
+      return folder ? `${label} · ${folder}` : label;
+    }
     default:
       return t('surfaceLabel.tab', 'Tab');
   }

@@ -82,6 +82,13 @@ export interface DeclaredAgentSnapshot {
   /** The agent session main has on record for this surface. */
   sessionId?: string | null;
   /**
+   * Whose session that is (`claude`, `qwen`, …), as the agent's own hooks said.
+   * The roster's last-resort kind: Qwen Code has neither a process identity nor
+   * a detection manifest, so without it a reporting Qwen pane was listed under
+   * its folder name — and a pane that reported nothing at all was not listed.
+   */
+  sessionProvider?: string | null;
+  /**
    * When this surface's current idle period began, stamped by the renderer on
    * the transition INTO idle (see withIdleSince). Not `updatedAt`: that moves
    * on every metadata report, so it cannot say when a turn ended.
@@ -212,7 +219,7 @@ function rosterEntryFor(
 ): AgentRosterEntry | null {
   const declaredState = declared && declared.state !== 'unknown' ? declared.state : null;
   const detectedState = detection && detection.state !== 'unknown' ? detection.state : null;
-  const kind = identity?.kind ?? detection?.agent ?? null;
+  const kind = identity?.kind ?? detection?.agent ?? (declared?.sessionId ? declared.sessionProvider : null) ?? null;
 
   // Three independent ways to be an agent pane: the agent said so, wmux
   // identified the process, or the screen carries an agent's chrome. Any one is

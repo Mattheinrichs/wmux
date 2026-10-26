@@ -17,6 +17,7 @@ import { openInPreviewTab } from './open-preview';
 import { useExplorerDiff } from './use-explorer-diff';
 import { statFor } from './explorer-diff';
 import { openDiffView } from '../Diff/open-diff';
+import { openGitView } from '../Git/open-git';
 import '../../styles/explorer.css';
 import type { PaneId, SurfaceId } from '../../../shared/types';
 
@@ -435,6 +436,13 @@ export function ExplorerPanel({ onClose, focusedPaneId }: ExplorerPanelProps): R
           title={t('explorer.refresh', 'Refresh')}
           onClick={reloadTree}
         >{'↻'}</button>
+        {diff.baseline === 'git' && activeWorkspaceId && (
+          <button
+            className="explorer-panel__action"
+            title={t('shortcutAction.openGitPanel', 'Open Git view')}
+            onClick={() => openGitView(useStore.getState(), activeWorkspaceId, focusedPaneId)}
+          >{'⑂'}</button>
+        )}
         <button
           className="explorer-panel__action"
           title={showHidden

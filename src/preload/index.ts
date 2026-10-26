@@ -430,6 +430,11 @@ contextBridge.exposeInMainWorld('wmux', {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.DIFF_UPDATE, handler);
     },
   },
+  // The project Git view (#362). One read-only request shape, validated in
+  // main; the renderer never names a git sub-command or an argument.
+  git: {
+    view: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.GIT_VIEW, request),
+  },
   cdp: {
     attach: (webContentsId: number, surfaceId?: string | null, workspaceId?: string | null) =>
       ipcRenderer.send(IPC_CHANNELS.CDP_ATTACH, webContentsId, surfaceId, workspaceId),

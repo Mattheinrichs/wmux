@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useT } from '../../i18n';
 import { DIFF_SELECT_EVENT, takeDiffSelection } from './open-diff';
+import { DiffHunks, parseDiff, type DiffHunk } from './diff-render';
 import '../../styles/diff.css';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -11,70 +12,6 @@ interface ChangedFile {
   additions: number;
   deletions: number;
 }
-
-interface DiffLine {
-  type: 'add' | 'remove' | 'context';
-  content: string;
-  oldNum?: number;
-  newNum?: number;
-}
-
-interface DiffHunk {
-  header: string;
-  context: string;
-  lines: DiffLine[];
-}
-
-// ─── Diff parser ────────────────────────────────────────────────────────────
-
-const HEADER_PREFIXES = ['diff --git', 'index ', '---', '+++', 'new file', 'deleted file'];
-// Anchored, with non-optional groups: the loose `,?\d*` form backtracks
-// super-linearly on a crafted `@@` line.
-const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
-
-/** Append one body line to `hunk`, advancing the line counters it owns. */
-function pushBodyLine(hunk: DiffHunk, line: string, nums: { old: number; new: number }): void {
-  if (line.startsWith('+')) {
-    hunk.lines.push({ type: 'add', content: line.slice(1), newNum: nums.new++ });
-  } else if (line.startsWith('-')) {
-    hunk.lines.push({ type: 'remove', content: line.slice(1), oldNum: nums.old++ });
-  } else if (line.startsWith(' ') || line === '') {
-    const content = line.startsWith(' ') ? line.slice(1) : '';
-    hunk.lines.push({ type: 'context', content, oldNum: nums.old++, newNum: nums.new++ });
-  }
-}
-
-function parseDiff(raw: string): DiffHunk[] {
-  if (!raw) return [];
-  const hunks: DiffHunk[] = [];
-  let currentHunk: DiffHunk | null = null;
-  const nums = { old: 0, new: 0 };
-
-  for (const line of raw.split('\n')) {
-    if (HEADER_PREFIXES.some(p => line.startsWith(p))) continue;
-
-    if (line.startsWith('@@')) {
-      const match = HUNK_HEADER.exec(line);
-      if (match) {
-        nums.old = parseInt(match[1]);
-        nums.new = parseInt(match[2]);
-        currentHunk = { header: line, context: match[3]?.trim() || '', lines: [] };
-        hunks.push(currentHunk);
-      }
-      continue;
-    }
-
-    if (currentHunk) pushBodyLine(currentHunk, line, nums);
-  }
-
-  return hunks;
-}
-
-const LINE_PREFIX: Record<DiffLine['type'], string> = {
-  add: '+',
-  remove: '-',
-  context: ' ',
-};
 
 // ─── Visibility ─────────────────────────────────────────────────────────────
 
@@ -399,28 +336,7 @@ export default function DiffPane({ surfaceId, cwd, baseRef }: DiffPaneProps) {
             <div className="diff-pane__file-header">
               <span className="diff-pane__file-header-path">{selectedFile}</span>
             </div>
-            {hunks.map((hunk, hi) => (
-              <div key={hi} className="diff-hunk">
-                <div className="diff-hunk__header">
-                  {hunk.header}
-                  {hunk.context && (
-                    <span className="diff-hunk__context"> {hunk.context}</span>
-                  )}
-                </div>
-                {hunk.lines.map((line, li) => (
-                  <div key={li} className={`diff-line diff-line--${line.type}`}>
-                    <span className="diff-line__gutter diff-line__gutter--old">
-                      {line.type !== 'add' ? line.oldNum : ''}
-                    </span>
-                    <span className="diff-line__gutter diff-line__gutter--new">
-                      {line.type !== 'remove' ? line.newNum : ''}
-                    </span>
-                    <span className="diff-line__prefix">{LINE_PREFIX[line.type]}</span>
-                    <pre className="diff-line__content">{line.content || '\u00A0'}</pre>
-                  </div>
-                ))}
-              </div>
-            ))}
+            <DiffHunks hunks={hunks} />
             <div className="diff-pane__end-spacer" />
           </>
         )}

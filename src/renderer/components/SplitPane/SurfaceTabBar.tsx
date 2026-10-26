@@ -26,7 +26,7 @@ interface SurfaceTabBarProps {
   onNew: () => void;
   /** Open a copy of the active tab in this pane (`+` dropdown). */
   onDuplicate?: () => void;
-  onNewTyped?: (type: 'terminal' | 'browser' | 'markdown' | 'prompts') => void;
+  onNewTyped?: (type: 'terminal' | 'browser' | 'markdown' | 'prompts' | 'git') => void;
   /** Detected shells surfaced in the `+` caret dropdown (PR #43). */
   shells?: ShellInfo[];
   onNewShell?: (shell: ShellInfo) => void;
@@ -56,6 +56,7 @@ function surfaceIcon(type: string, isAgent: boolean): string {
     case 'diff': return '±';
     case 'code': return '{}';
     case 'prompts': return '❯';
+    case 'git': return '⑂';
     default: return '○';
   }
 }
@@ -252,7 +253,7 @@ export default function SurfaceTabBar({
     };
   }, [openMenu]);
 
-  const pickNew = useCallback((type: 'terminal' | 'browser' | 'markdown' | 'prompts') => {
+  const pickNew = useCallback((type: 'terminal' | 'browser' | 'markdown' | 'prompts' | 'git') => {
     setOpenMenu(null);
     if (onNewTyped) onNewTyped(type);
     else onNew();
@@ -543,6 +544,9 @@ export default function SurfaceTabBar({
               </button>
               <button role="menuitem" onClick={() => pickNew('prompts')}>
                 <span className="surface-tab-menu__icon">{surfaceIcon('prompts', false)}</span> {t('surfaceLabel.prompts', 'Prompts')}
+              </button>
+              <button role="menuitem" onClick={() => pickNew('git')}>
+                <span className="surface-tab-menu__icon">{surfaceIcon('git', false)}</span> {t('surfaceLabel.git', 'Git')}
               </button>
               {profiles && profiles.length > 0 && (
                 <>

@@ -264,6 +264,20 @@ describe('rollupAgents — identity (phase 2)', () => {
     expect(out.roster[0]).toMatchObject({ kind: null, identitySource: null });
   });
 
+  // Qwen Code has no process identity and no detection manifest: the provider
+  // its own hooks reported is the only thing that names it.
+  it('falls back to the session provider the hooks reported, below identity and detection', () => {
+    const tree = leaf('pane-1', [{ id: 'surf-a', currentCwd: 'C:\\dev\\testtt' }]);
+    const qwen = declared({ state: 'working', sessionId: 's-1', sessionProvider: 'qwen' });
+    expect(rollupAgents([ws('ws-1', 'alpha', tree)], { 'surf-a': qwen }, NOW).roster[0])
+      .toMatchObject({ kind: 'qwen', label: 'qwen', identitySource: null });
+    expect(rollupAgents([ws('ws-1', 'alpha', tree)], { 'surf-a': qwen }, NOW, { 'surf-a': ident('codex') }).roster[0].kind)
+      .toBe('codex');
+    // A provider left behind by a released session names nothing.
+    const released = declared({ state: 'working', sessionId: null, sessionProvider: 'qwen' });
+    expect(rollupAgents([ws('ws-1', 'alpha', tree)], { 'surf-a': released }, NOW).roster[0].kind).toBeNull();
+  });
+
   it('ignores identity for a surface no longer in any split tree', () => {
     const out = rollupAgents([ws('ws-1', 'alpha', leaf('pane-1', [{ id: 'surf-a' }]))], {}, NOW, {
       'surf-a': ident('claude'),
