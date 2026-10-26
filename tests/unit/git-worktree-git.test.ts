@@ -29,7 +29,7 @@ import {
   worktreeRoot,
   probeRepo,
 } from '../../src/main/git-worktree';
-import { gitExecutable } from '../../src/main/git-view';
+import { gitExecutable, worktreeKey } from '../../src/main/git-view';
 
 // The same absolute git the module under test runs.
 let GIT = '';
@@ -113,8 +113,10 @@ describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_0
   describe('F1 — repoRootFor returns the main checkout, never the worktree', () => {
     it('returns the main repository root from inside a linked worktree', async () => {
       const wtPath = await make('feat-f1');
-      expect((await repoRootFor(wtPath))!.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
-      expect((await repoRootFor(mainRepo))!.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      // Compared as worktreeKey: git answers the LONG path while os.tmpdir() can
+      // be an 8.3 short name (`C:\Users\RUNNER~1` on the GitHub runner).
+      expect(worktreeKey((await repoRootFor(wtPath))!)).toBe(worktreeKey(mainRepo));
+      expect(worktreeKey((await repoRootFor(mainRepo))!)).toBe(worktreeKey(mainRepo));
       expect((await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN })).outcome).toBe('removed');
     });
 
@@ -127,7 +129,7 @@ describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_0
 
     it('probeRepo returns repoRoot and branch, or null for non-repo', async () => {
       const probe = await probeRepo(mainRepo);
-      expect(probe!.repoRoot.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      expect(worktreeKey(probe!.repoRoot)).toBe(worktreeKey(mainRepo));
       expect(probe!.currentBranch).toBe('main');
       expect(await probeRepo(path.join(tempBase, 'empty-dir'))).toBeNull();
     });
@@ -141,7 +143,7 @@ describe.runIf(hasGit)('git-worktree integration with real git', { timeout: 60_0
       expect(rec.branch).toBe('feat-registry');
       expect(rec.baseBranch).toBe('HEAD~1');
       expect(rec.baseSha).toBe(gitIn(mainRepo, ['rev-parse', 'HEAD~1']));
-      expect(rec.repoRoot.toLowerCase()).toBe(path.resolve(mainRepo).toLowerCase());
+      expect(worktreeKey(rec.repoRoot)).toBe(worktreeKey(mainRepo));
       // The checkout sits exactly two levels under the root.
       expect(path.relative(worktreeRoot(), wtPath).split(path.sep)).toHaveLength(2);
       await removeWorktree(wtPath, { mode: 'discard', ...NO_DRAIN });

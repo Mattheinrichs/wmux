@@ -74,7 +74,10 @@ describe('git-worktree pure functions', () => {
       const branchSlug = rest.slice(0, rest.lastIndexOf('-'));
       expect(repoSlug.length).toBeLessThanOrEqual(SLUG_MAX);
       expect(branchSlug.length).toBeLessThanOrEqual(SLUG_MAX);
-      expect(path.join(worktreeRoot(), slug).length).toBeLessThanOrEqual(96);
+      // Bounded relative to the root: the root itself is the user's
+      // LOCALAPPDATA, whose length is not ours (the CI runner's is longer).
+      // Two segments, a separator, a dash and the 8-char hash.
+      expect(slug.length).toBeLessThanOrEqual(2 * SLUG_MAX + 1 + 1 + 8);
     });
   });
 

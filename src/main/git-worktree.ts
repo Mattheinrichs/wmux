@@ -274,8 +274,10 @@ function writeRegistry(reg: Registry): void {
   fs.renameSync(tmp, file);
 }
 
+// worktreeKey, not a lowercase compare: a recorded path and a probed one can
+// differ only by an 8.3 short name or a junction (#362).
 function samePath(a: string, b: string): boolean {
-  return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  return worktreeKey(a) === worktreeKey(b);
 }
 
 /** The record main wrote when it created this worktree, or null. */
