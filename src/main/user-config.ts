@@ -38,6 +38,10 @@
  *   layout = "grid"            # grid | columns | rows | left | down | single
  *   snapshot-minutes = 5       # snapshot the layout this often; 0 = never
  *
+ *   [workspace.keep-awake]     # keep Windows awake (issue #363); pushed to main at boot
+ *   mode = "smart"             # smart (while an agent reports working) | always | off
+ *   prevent-display-sleep = false   # also keep the screen on
+ *
  *   [browser]
  *   dev-ports = [8501, 4321]   # extra dev-server ports, merged with built-in defaults
  *   auto-open = true           # auto-navigate the browser to a newly-detected dev port
@@ -488,21 +492,38 @@ function mapWorkspaceSection(root: TomlTable, errors: string[]): NonNullable<Use
     }
   }
 
-  const keepAwakeTable = asTable(workspace['keep-awake'] ?? workspace.keepAwake ?? root['keep-awake']);
-  if (keepAwakeTable) {
-    const keepAwake: NonNullable<NonNullable<UserConfig['workspace']>['keepAwake']> = {};
-    const mode = asString(keepAwakeTable.mode);
-    if (mode === 'smart' || mode === 'always' || mode === 'off') {
-      keepAwake.mode = mode;
-    } else if (mode !== undefined) {
-      errors.push(`workspace.keep-awake.mode: "${mode}" not one of smart|always|off`);
-    }
+  const keepAwake = mapKeepAwake(workspace, errors);
+  if (keepAwake) out.keepAwake = keepAwake;
 
-    const preventDisplay = asBool(keepAwakeTable['prevent-display-sleep'] ?? keepAwakeTable.preventDisplaySleep);
-    if (preventDisplay !== undefined) {
-      keepAwake.preventDisplaySleep = preventDisplay;
+  return Object.keys(out).length ? out : undefined;
+}
+
+type KeepAwakeConfig = NonNullable<NonNullable<UserConfig['workspace']>['keepAwake']>;
+const KEEP_AWAKE_MODES: readonly NonNullable<KeepAwakeConfig['mode']>[] = ['smart', 'always', 'off'];
+
+/** `[workspace.keep-awake]` (issue #363) — the only spelling read. */
+function mapKeepAwake(workspace: TomlTable, errors: string[]): KeepAwakeConfig | undefined {
+  const table = asTable(workspace['keep-awake']);
+  if (!table) return undefined;
+  const out: KeepAwakeConfig = {};
+
+  const modeRaw = table.mode;
+  if (modeRaw !== undefined) {
+    const mode = asString(modeRaw);
+    if (mode === undefined) {
+      errors.push('workspace.keep-awake.mode: expected a string');
+    } else if ((KEEP_AWAKE_MODES as readonly string[]).includes(mode)) {
+      out.mode = mode as KeepAwakeConfig['mode'];
+    } else {
+      errors.push(`workspace.keep-awake.mode: "${mode}" not one of ${KEEP_AWAKE_MODES.join('|')}`);
     }
-    if (Object.keys(keepAwake).length) out.keepAwake = keepAwake;
+  }
+
+  const preventRaw = table['prevent-display-sleep'] ?? table.preventDisplaySleep;
+  if (preventRaw !== undefined) {
+    const prevent = asBool(preventRaw);
+    if (prevent === undefined) errors.push('workspace.keep-awake.prevent-display-sleep: expected a boolean');
+    else out.preventDisplaySleep = prevent;
   }
 
   return Object.keys(out).length ? out : undefined;

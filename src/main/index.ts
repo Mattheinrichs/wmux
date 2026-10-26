@@ -57,8 +57,8 @@ import { applyHistoryRestore, claimHistoryRestore, forgetHistoryRestore, parkHis
 import { stampAgentSessionIds } from './agent-session-persistence';
 import { noteIconRevision } from './icon-cache';
 import { installGpuWatchdog } from './gpu-watchdog';
-import { getAgentState, currentPromptId, currentPromptView, reportAgentSession, isAnsweringInput, noteHumanInput, onAgentStateBroadcast, onAgentSessionChanged, releaseAgyAtPrompt, listAgentStates } from './agent-state';
-import { getAwakeManager } from './awake-manager';
+import { getAgentState, currentPromptId, currentPromptView, reportAgentSession, isAnsweringInput, noteHumanInput, onAgentStateBroadcast, onAgentSessionChanged, releaseAgyAtPrompt, listAgentStates, WORKING_TRUST_MS } from './agent-state';
+import { getAwakeManager, bindAwakeToAgentStates } from './awake-manager';
 import {
   pruneDeadClaudeSessions,
   listKnownTranscriptIds,
@@ -1519,9 +1519,12 @@ app.whenReady().then(() => {
       }
     }
   });
-  onAgentStateBroadcast(() => {
-    const workingCount = listAgentStates().filter((s) => s.state === 'working').length;
-    awakeManager.onWorkingAgentsCountChanged(workingCount);
+  // Counted on every broadcast, and re-counted when the oldest `working`
+  // claim outlives WORKING_TRUST_MS — that downgrade is never broadcast.
+  bindAwakeToAgentStates(awakeManager, {
+    list: listAgentStates,
+    subscribe: onAgentStateBroadcast,
+    trustMs: WORKING_TRUST_MS,
   });
 
   // Tree-kill whatever a previously CRASHED instance left running (issue #139).

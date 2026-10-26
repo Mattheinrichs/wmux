@@ -59,7 +59,7 @@ import {
   MD_DIALOG_EXTENSIONS,
 } from './markdown-file';
 import { grantFilePath, isFilePathGranted } from './file-grants';
-import { getAwakeManager, type KeepAwakeMode } from './awake-manager';
+import { getAwakeManager, isKeepAwakeMode } from './awake-manager';
 import { agentBrowserPath, runAgentBrowser, unwrapAgentData, type RunResult } from './agent-browser-cli';
 // The process-wide singletons. Constructing a second SessionRegistry or
 // DashboardDaemon here would hand the same stream port to two surfaces and let
@@ -1212,12 +1212,14 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
   ipcMain.handle(IPC_CHANNELS.AWAKE_GET_STATE, () => {
     return getAwakeManager().getState();
   });
-  ipcMain.handle(IPC_CHANNELS.AWAKE_SET_MODE, (_event, mode: KeepAwakeMode) => {
-    getAwakeManager().setMode(mode);
+  // Anything but a known mode / a real boolean is ignored: the reply is the
+  // unchanged state, never a coerced one.
+  ipcMain.handle(IPC_CHANNELS.AWAKE_SET_MODE, (_event, mode: unknown) => {
+    if (isKeepAwakeMode(mode)) getAwakeManager().setMode(mode);
     return getAwakeManager().getState();
   });
-  ipcMain.handle(IPC_CHANNELS.AWAKE_SET_PREVENT_DISPLAY_SLEEP, (_event, prevent: boolean) => {
-    getAwakeManager().setPreventDisplaySleep(prevent);
+  ipcMain.handle(IPC_CHANNELS.AWAKE_SET_PREVENT_DISPLAY_SLEEP, (_event, prevent: unknown) => {
+    if (typeof prevent === 'boolean') getAwakeManager().setPreventDisplaySleep(prevent);
     return getAwakeManager().getState();
   });
 

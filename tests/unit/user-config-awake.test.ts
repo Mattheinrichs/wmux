@@ -57,4 +57,25 @@ describe('user-config keep-awake parsing', () => {
     const out = loadUserConfig(tmpPath);
     expect(out.errors).toContain('workspace.keep-awake.mode: "caffeine" not one of smart|always|off');
   });
+
+  it('reports a non-string mode and a non-boolean display flag', () => {
+    tmpPath = writeTmp(`
+      [workspace.keep-awake]
+      mode = 3
+      prevent-display-sleep = "yes"
+    `);
+    const out = loadUserConfig(tmpPath);
+    expect(out.errors).toContain('workspace.keep-awake.mode: expected a string');
+    expect(out.errors).toContain('workspace.keep-awake.prevent-display-sleep: expected a boolean');
+    expect(out.workspace?.keepAwake).toBeUndefined();
+  });
+
+  it('reads only [workspace.keep-awake], never a top-level [keep-awake]', () => {
+    tmpPath = writeTmp(`
+      [keep-awake]
+      mode = "always"
+    `);
+    const out = loadUserConfig(tmpPath);
+    expect(out.workspace?.keepAwake).toBeUndefined();
+  });
 });

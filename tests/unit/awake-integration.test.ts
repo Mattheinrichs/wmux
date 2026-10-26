@@ -7,8 +7,8 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { reportAgent, clearAgentState, resetAgentState, onAgentStateBroadcast, listAgentStates } from '../../src/main/agent-state';
-import { AwakeManager, type PowerBlockerDriver } from '../../src/main/awake-manager';
+import { reportAgent, clearAgentState, resetAgentState, onAgentStateBroadcast, listAgentStates, WORKING_TRUST_MS } from '../../src/main/agent-state';
+import { AwakeManager, bindAwakeToAgentStates, type PowerBlockerDriver } from '../../src/main/awake-manager';
 import type { SurfaceId } from '../../src/shared/types';
 
 describe('Awake Integration with Agent Lifecycle', () => {
@@ -37,9 +37,10 @@ describe('Awake Integration with Agent Lifecycle', () => {
     };
 
     manager = new AwakeManager(driver, 'smart');
-    unhook = onAgentStateBroadcast(() => {
-      const working = listAgentStates().filter((s) => s.state === 'working').length;
-      manager.onWorkingAgentsCountChanged(working);
+    unhook = bindAwakeToAgentStates(manager, {
+      list: listAgentStates,
+      subscribe: onAgentStateBroadcast,
+      trustMs: WORKING_TRUST_MS,
     });
   });
 
@@ -89,5 +90,26 @@ describe('Awake Integration with Agent Lifecycle', () => {
 
     clearAgentState(surf);
     expect(manager.getState().isActive).toBe(false);
+  });
+
+  it('releases the blocker once a working claim goes stale, with no further report', () => {
+    vi.useFakeTimers();
+    try {
+      // Re-bind under fake timers so the expiry timer is a fake one.
+      unhook();
+      unhook = bindAwakeToAgentStates(manager, {
+        list: listAgentStates,
+        subscribe: onAgentStateBroadcast,
+        trustMs: WORKING_TRUST_MS,
+      });
+      const surf = 'surf-test-4' as SurfaceId;
+      reportAgent(surf, { runDepth: 1 });
+      expect(manager.getState().isActive).toBe(true);
+
+      vi.advanceTimersByTime(WORKING_TRUST_MS + 2_000);
+      expect(manager.getState().isActive).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

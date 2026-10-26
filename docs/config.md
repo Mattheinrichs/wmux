@@ -80,6 +80,11 @@ layout = "grid"    # grid | columns | rows | left | down | single
 # Snapshot the live layout this often, as an "Auto-save …" session. 0 = never.
 snapshot-minutes = 5
 
+[workspace.keep-awake]
+# Keep Windows from sleeping (see "Keep awake" below).
+mode = "smart"                  # smart | always | off
+prevent-display-sleep = false   # also keep the screen on
+
 [browser]
 # Start page for a workspace's browser panel. Needs a scheme.
 default-url = "http://localhost:3000"
@@ -124,6 +129,31 @@ says so. Before 2.8.0 the sidebar `+` always made three panes and
 `wmux new-workspace` always made one — both now follow this setting, and
 `wmux new-workspace --panes 1 --layout single` pins the old CLI shape for a
 script that depends on it.
+
+## Keep awake
+
+`[workspace.keep-awake]` (Settings → Workspace → *Keep computer awake*, or the
+coffee cup in the titlebar) stops Windows from sleeping while wmux has work to
+do (issue #363).
+
+```toml
+[workspace.keep-awake]
+mode = "smart"                  # smart | always | off
+prevent-display-sleep = false
+```
+
+- `smart` (default) holds a sleep blocker only while at least one pane reports
+  itself **working** — Claude Code, Qwen Code and Grok through wmux's hooks, the
+  OpenCode plugin, or anything calling `wmux report-agent`. A pane waiting on
+  you, idle, or with an agent that reports nothing does not keep the machine
+  up, and a `working` claim nobody has renewed for 15 minutes stops counting.
+- `always` holds it for as long as wmux runs; `off` never takes it.
+- `prevent-display-sleep = true` keeps the screen on too; otherwise the display
+  may still turn off and lock while the system stays awake.
+
+The choice is stored by wmux itself and applies from the next launch onward
+whichever window it was made in. When this section is present it is applied at
+every startup and reload, over what was picked in the UI.
 
 ## Session snapshots
 

@@ -999,7 +999,7 @@ export function engineOf(surface: { type: SurfaceType; browserEngine?: BrowserEn
   return surface.browserEngine === 'agent' ? 'agent' : 'web';
 }
 
-
+/** Keep Windows awake (issue #363). Owned and persisted by main's awake-manager.ts. */
 export type KeepAwakeMode = 'smart' | 'always' | 'off';
 
 export interface KeepAwakeState {
