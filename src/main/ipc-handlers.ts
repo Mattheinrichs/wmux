@@ -35,6 +35,7 @@ import { AgentManager } from './agent-manager';
 import { saveNamedSession, loadNamedSession, listNamedSessions, deleteNamedSession, loadSession } from './session-persistence';
 import { listDir, resolveInRoot, isExecutablePath } from './explorer-fs';
 import { readCodeFile, writeCodeFile } from './code-file';
+import { resolveTerminalFileLink } from './terminal-file-link';
 import { getExplorerRoot, forgetExplorerRoot } from './explorer-roots';
 import { sessionWindows, toRestorePayload, restoreAnswerFor } from './session-windows';
 import { loadSettings, saveSetting } from './settings-store';
@@ -1531,6 +1532,15 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
         return { error: 'Failed to open file', code: 'read_failed' };
       }
       return { ok: true };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.TERMINAL_RESOLVE_FILE_LINK,
+    async (event, surfaceId: unknown, text: unknown) => {
+      const root = explorerRootFor(surfaceId, event.sender);
+      if ('error' in root && root.code === 'remote') return root;
+      return resolveTerminalFileLink('error' in root ? null : root.realRoot, text);
     },
   );
 

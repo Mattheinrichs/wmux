@@ -289,6 +289,12 @@ export interface ExplorerListError { error: string; code: ExplorerErrorCode }
 
 export type ExplorerListResult = ExplorerListOk | ExplorerListError;
 
+export type TerminalFileLinkTarget =
+  | { kind: 'jailed'; relPath: string; absPath: string; name: string; viewable: boolean }
+  | { kind: 'markdown'; absPath: string; name: string };
+
+export type TerminalFileLinkResult = TerminalFileLinkTarget | ExplorerListError;
+
 /**
  * One changed file, as the explorer's +N/-N column consumes it.
  *
@@ -864,6 +870,7 @@ export const IPC_CHANNELS = {
   // every ordinary source file the tree now offers.
   EXPLORER_REVEAL: 'explorer:reveal',
   EXPLORER_OPEN_IN_APP: 'explorer:open-in-app',
+  TERMINAL_RESOLVE_FILE_LINK: 'terminal:resolve-file-link',
   // Orchestration (wmux-orchestrator plugin state broadcast)
   ORCHESTRATION_UPDATE: 'orchestration:update',
   ORCHESTRATION_CLEAR: 'orchestration:clear',
