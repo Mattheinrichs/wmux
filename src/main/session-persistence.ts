@@ -392,6 +392,17 @@ export function shouldSnapshot(input: SnapshotDecisionInput): boolean {
 }
 
 /**
+ * Split-tree keys that move with no layout change at all. Each surface's `cwd`
+ * and `currentCwd` are rewritten on every prompt (#134). `resolvedShell` moves
+ * when a Store update reinstalls PowerShell under a new versioned folder.
+ * `activeSurfaceIndex` moves whenever a pane switches tabs. Counted, they turned
+ * the ring into the last fifteen minutes of ordinary use: three slots, each
+ * spent on a `cd` or a tab click, and the state worth recovering was rotated
+ * out behind them.
+ */
+const TREE_VIEW_STATE = new Set(['cwd', 'currentCwd', 'resolvedShell', 'activeSurfaceIndex']);
+
+/**
  * What "the layout changed" means, as one string.
  *
  * Deliberately NOT the whole session blob. `bounds` moves when the window is
@@ -400,13 +411,19 @@ export function shouldSnapshot(input: SnapshotDecisionInput): boolean {
  * the fingerprint differ on essentially every tick, i.e. no gate at all. What is
  * here is what a person would call losing something: which workspaces exist,
  * what they are called, and the shape and contents of their split trees.
+ *
+ * The split tree carries the same kind of noise one level down, so
+ * `TREE_VIEW_STATE` keys are left out of it too.
  */
 export function layoutFingerprint(data: SessionData | null | undefined): string {
   const windows = Array.isArray(data?.windows) ? data!.windows : [];
   const workspaces = windows.flatMap(w => (Array.isArray(w?.workspaces) ? w.workspaces : []));
   if (workspaces.length === 0) return '';
   try {
-    return JSON.stringify(workspaces.map(w => [w.id, w.title, w.pinned, w.splitTree]));
+    return JSON.stringify(
+      workspaces.map(w => [w.id, w.title, w.pinned, w.splitTree]),
+      (key, value) => (TREE_VIEW_STATE.has(key) ? undefined : value),
+    );
   } catch {
     // A cyclic or otherwise unserialisable tree. Returning '' means "do not
     // snapshot" rather than "snapshot every tick", which is the safe way round:

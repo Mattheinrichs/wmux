@@ -130,6 +130,39 @@ describe('layoutFingerprint (issue #238)', () => {
     expect(layoutFingerprint(session({ cwd: 'C:\\repo' }))).toBe(layoutFingerprint(session({ cwd: 'C:\\repo\\src' })));
   });
 
+  describe('view state inside the split tree', () => {
+    const pane = (over: { index?: number; surface?: Record<string, unknown> } = {}) => ({
+      type: 'leaf',
+      paneId: 'pane-1',
+      activeSurfaceIndex: over.index ?? 0,
+      surfaces: [
+        { id: 'surf-1', type: 'terminal', cwd: 'C:\\repo', currentCwd: 'C:\\repo', resolvedShell: 'C:\\pwsh-7.6.7\\pwsh.exe', ...over.surface },
+        { id: 'surf-2', type: 'terminal' },
+      ],
+    });
+    const fp = (tree: unknown): string => layoutFingerprint(session({ tree }));
+
+    it('does NOT change when a pane\'s shell cds', () => {
+      // The workspace cwd above is not where a shell's cwd lives: each surface
+      // carries its own, frozen into the tree on every save.
+      expect(fp(pane())).toBe(fp(pane({ surface: { cwd: 'C:\\repo\\src', currentCwd: 'C:\\repo\\src' } })));
+    });
+
+    it('does NOT change when a pane switches tabs', () => {
+      expect(fp(pane({ index: 0 }))).toBe(fp(pane({ index: 1 })));
+    });
+
+    it('does NOT change when the shell resolves to a new install folder', () => {
+      // A Store update of PowerShell moves pwsh.exe to a new versioned folder.
+      expect(fp(pane())).toBe(fp(pane({ surface: { resolvedShell: 'C:\\pwsh-7.6.8\\pwsh.exe' } })));
+    });
+
+    it('still changes when a tab is renamed or opens another conversation', () => {
+      expect(fp(pane())).not.toBe(fp(pane({ surface: { customTitle: 'api' } })));
+      expect(fp(pane())).not.toBe(fp(pane({ surface: { claudeSessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' } })));
+    });
+  });
+
   it('is empty for a session with nothing in it', () => {
     expect(layoutFingerprint({ version: 1, windows: [] })).toBe('');
     expect(layoutFingerprint(null)).toBe('');
