@@ -9,6 +9,7 @@ import React from 'react';
 import logoSrc from '../../../../resources/icons/icon.svg';
 import NotificationBell from './NotificationBell';
 import UpdateBadge from './UpdateBadge';
+import KeepAwakeMenu from './KeepAwakeMenu';
 import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder, IconSidebar } from './icons';
 import WindowControls, { useIsFramelessWindow } from './WindowControls';
 import { NotificationInfo, WorkspaceId, PaneId, SurfaceId } from '../../../shared/types';
@@ -73,6 +74,7 @@ export default function Titlebar({
   // Clear-transparency windows are frameless and have no native caption
   // buttons, so this is where they come from.
   const frameless = useIsFramelessWindow();
+
   return (
     <div className="titlebar">
       <div className="titlebar__left">
@@ -133,6 +135,7 @@ export default function Titlebar({
         >
           <IconFocus />
         </button>
+        <KeepAwakeMenu />
         {onToggleExplorer && (
           <button
             className={`titlebar__btn${explorerOpen ? ' titlebar__btn--active' : ''}`}

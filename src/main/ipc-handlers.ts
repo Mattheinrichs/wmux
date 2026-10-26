@@ -59,6 +59,7 @@ import {
   MD_DIALOG_EXTENSIONS,
 } from './markdown-file';
 import { grantFilePath, isFilePathGranted } from './file-grants';
+import { getAwakeManager, type KeepAwakeMode } from './awake-manager';
 import { agentBrowserPath, runAgentBrowser, unwrapAgentData, type RunResult } from './agent-browser-cli';
 // The process-wide singletons. Constructing a second SessionRegistry or
 // DashboardDaemon here would hand the same stream port to two surfaces and let
@@ -1206,6 +1207,19 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
   // window showed an empty roster beside three busy panes, and a blocked agent
   // that is waiting reports nothing at all, so it could stay invisible forever.
   ipcMain.handle(IPC_CHANNELS.AGENT_STATE_LIST, () => listAgentStates());
+
+  // Keep Awake controls
+  ipcMain.handle(IPC_CHANNELS.AWAKE_GET_STATE, () => {
+    return getAwakeManager().getState();
+  });
+  ipcMain.handle(IPC_CHANNELS.AWAKE_SET_MODE, (_event, mode: KeepAwakeMode) => {
+    getAwakeManager().setMode(mode);
+    return getAwakeManager().getState();
+  });
+  ipcMain.handle(IPC_CHANNELS.AWAKE_SET_PREVENT_DISPLAY_SLEEP, (_event, prevent: boolean) => {
+    getAwakeManager().setPreventDisplaySleep(prevent);
+    return getAwakeManager().getState();
+  });
 
   // Same bootstrap problem, same shape: AGENT_IDENTITY is delta-only, and a
   // pane whose shell spec named an agent at create time never emits again.
