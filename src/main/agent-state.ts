@@ -174,6 +174,23 @@ function notifySessionChanged(): void {
 /** Guards against a hostile or buggy reporter growing the map without bound. */
 const MAX_TRACKED_SURFACES = 256;
 
+/**
+ * Handles whose pane lost its process while the agent still held them.
+ *
+ * A PTY that dies under a live agent is not the user leaving the conversation.
+ * An agent that quits on its own releases first (Claude's SessionEnd, the Codex
+ * launcher, the OpenCode plugin), so a pane that reaches `clearAgentState` still
+ * holding a handle had its process killed from outside: a Microsoft Store update
+ * of PowerShell terminates every packaged `pwsh.exe` at once, and so does a
+ * cleanup script or a crash. The run state goes, because it describes a dead
+ * process. The handle stays, so the next restore reopens the conversation
+ * instead of a bare shell in every tab that was working.
+ */
+const orphanedSessions = new Map<SurfaceId, { provider: AgentSessionProvider; sessionId: string }>();
+export function orphanedSession(surfaceId: SurfaceId): { provider: AgentSessionProvider; sessionId: string } | undefined {
+  return orphanedSessions.get(surfaceId);
+}
+
 function blank(surfaceId: SurfaceId): AgentStateRecord {
   return {
     surfaceId,
@@ -483,6 +500,7 @@ export function reportAgentSession(
   record.sessionId = sessionId;
   record.sessionProvider = provider;
   releasedSessions.delete(surfaceId);
+  orphanedSessions.delete(surfaceId);
   missingSessions.delete(surfaceId);
   const result = commit(record);
   if (changed) notifySessionChanged();
@@ -805,7 +823,11 @@ export function releaseAgyAtPrompt(surfaceId: SurfaceId, ranAgy: boolean): boole
   if (!record?.sessionId && !ranAgy) return false;
   // forget() announces a dropped session itself; with none, the restored id in
   // session.json is what changes, so say so for a prompt save.
-  if (record) forget(surfaceId); else releasedSessions.add(surfaceId);
+  if (record) forget(surfaceId);
+  else {
+    releasedSessions.add(surfaceId);
+    orphanedSessions.delete(surfaceId);
+  }
   if (!record?.sessionId) notifySessionChanged();
   return true;
 }
@@ -818,9 +840,22 @@ export function releaseAgyAtPrompt(surfaceId: SurfaceId, ranAgy: boolean): boole
  * pane as `working` or `blocked` forever. A shell can exit while its tab stays
  * open, so the surface is still on screen to render. Announcing a ghost is the
  * precise failure this whole module exists to prevent.
+ *
+ * It must NOT release the session handle. The process is gone, but nothing says
+ * the user left the conversation (see `orphanedSessions`). Releasing here is what
+ * turned a Store update of PowerShell into every Claude and Codex tab coming
+ * back as a bare shell.
  */
 export function clearAgentState(surfaceId: SurfaceId): void {
-  if (records.has(surfaceId)) forget(surfaceId);
+  const record = records.get(surfaceId);
+  if (!record) return;
+  if (record.sessionId) {
+    if (orphanedSessions.size >= MAX_TRACKED_SURFACES && !orphanedSessions.has(surfaceId)) {
+      orphanedSessions.delete(orphanedSessions.keys().next().value!);
+    }
+    orphanedSessions.set(surfaceId, { provider: record.sessionProvider ?? 'claude', sessionId: record.sessionId });
+  }
+  forget(surfaceId, { release: false });
 }
 
 /**
@@ -830,12 +865,17 @@ export function clearAgentState(surfaceId: SurfaceId): void {
  * blank record resolves to `idle`, and `idle` is a CLAIM — the sidebar gives a
  * declared state precedence over its own inference. A forgotten pane has made
  * no claim at all, so it must fall back to the heuristic, not be pinned idle.
+ *
+ * `release: false` is the PTY-exit path: the record goes, the handle does not.
  */
-function forget(surfaceId: SurfaceId): void {
-  const hadSession = !!records.get(surfaceId)?.sessionId;
-  releasedSessions.add(surfaceId);
+function forget(surfaceId: SurfaceId, { release = true }: { release?: boolean } = {}): void {
+  const dropsSession = release && (!!records.get(surfaceId)?.sessionId || orphanedSessions.has(surfaceId));
+  if (release) {
+    releasedSessions.add(surfaceId);
+    orphanedSessions.delete(surfaceId);
+  }
   records.delete(surfaceId);
-  if (hadSession) notifySessionChanged();
+  if (dropsSession) notifySessionChanged();
   send({
     surfaceId,
     state: 'unknown',
@@ -978,5 +1018,6 @@ function notifyBroadcastListeners(): void {
 export function resetAgentState(): void {
   records.clear();
   releasedSessions.clear();
+  orphanedSessions.clear();
   missingSessions.clear();
 }
