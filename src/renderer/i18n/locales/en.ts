@@ -624,18 +624,21 @@ export const en = {
   'settings.workspacePanel.restoreClaudeSessionsHint': 'When wmux restores a session, re-launch each terminal that was running Claude Code with `claude --resume`, in the directory it was in. Off by default: every such pane starts an agent at once. Panes whose conversation Claude no longer has are skipped, and a Claude you exited cleanly is not resumed.',
   'settings.workspacePanel.explorerOpenByDefault': 'Show the file explorer by default',
   'settings.workspacePanel.explorerOpenByDefaultHint': 'Opens the file explorer on the right of every workspace, with live +/- line counts per file and the files your agent is editing. Works in any folder: a git repo is compared to its last commit, any other folder to how it looked when the panel opened. Closing it in a workspace keeps it closed there; turn this off to hide it everywhere. A workspace whose terminals have not reported a folder yet does not open it.',
-  
   'settings.workspacePanel.keepAwakeMode': 'Keep computer awake',
-  'settings.workspacePanel.keepAwakeSmart': 'Smart (when agents are active)',
+  'settings.workspacePanel.keepAwakeSmart': 'Smart (when agents are working)',
   'settings.workspacePanel.keepAwakeAlways': 'Always (keep awake while wmux is open)',
   'settings.workspacePanel.keepAwakeOff': 'Off (system defaults)',
   'settings.workspacePanel.keepAwakeHint':
-    'Prevents Windows from sleeping while coding agents are working. Smart mode automatically blocks sleep while agents are active, and releases it when idle or blocked on human input.',
+    'Prevents Windows from sleeping while coding agents are working. Smart mode only engages for agents that report a working state through hooks — Claude Code, Qwen Code, Grok, the OpenCode plugin, or `wmux report-agent` — and releases it when they are idle or waiting on you. A working claim not renewed for 15 minutes stops counting.',
   'settings.workspacePanel.preventDisplaySleep': 'Keep display awake',
   'settings.workspacePanel.preventDisplaySleepHint':
     'Also keep screens awake to prevent Windows lock screen or display timeout. When disabled (default), system sleep is prevented while screens may turn off.',
-
   'titlebar.keepAwake.title': 'Keep computer awake',
+  'titlebar.keepAwake.ariaLabel': 'Keep computer awake menu',
+  'titlebar.keepAwake.tooltipSmartActive': 'Keep Awake: Smart (Active — agent working)',
+  'titlebar.keepAwake.tooltipSmartArmed': 'Keep Awake: Smart (Armed — waiting for agent)',
+  'titlebar.keepAwake.tooltipOn': 'Keep Awake: On',
+  'titlebar.keepAwake.tooltipOff': 'Keep Awake: Off',
   'titlebar.keepAwake.on': 'On',
   'titlebar.keepAwake.onHint': 'Keep this computer awake continuously',
   'titlebar.keepAwake.smart': 'Smart',
@@ -644,7 +647,7 @@ export const en = {
   'titlebar.keepAwake.offHint': 'Allow normal system sleep behavior',
   'titlebar.keepAwake.active': 'Active',
   'titlebar.keepAwake.inactive': 'Inactive',
-'settings.workspacePanel.autoOpenDiff': 'Auto-open diff tab on agent edits',
+  'settings.workspacePanel.autoOpenDiff': 'Auto-open diff tab on agent edits',
   'settings.workspacePanel.autoOpenDiffHint':
     'When an agent edits or writes files, wmux pops a diff tab in the bottom pane. Turn this off to stop it appearing.',
   'settings.workspacePanel.shellSection': 'Shell',

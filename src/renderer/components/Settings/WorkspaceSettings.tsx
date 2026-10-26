@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { useT } from '../../i18n';
 import { getAllPaneIds, findLeaf, patchLeafPrimarySurface, MAX_WORKSPACE_PANES } from '../../store/split-utils';
 import type { PaneId, WorkspaceLayout, KeepAwakeMode } from '../../../shared/types';
+import { useKeepAwake } from '../../hooks/useKeepAwake';
 
 /**
  * One editable startup-command line for a saved layout's pane.
@@ -93,6 +94,8 @@ export default function WorkspaceSettings() {
     workspacePrefs, setWorkspacePrefs,
     savedLayouts, setSavedLayouts, requestLayoutSave, updateLayoutFromCurrent,
   } = useStore();
+  // Keep-awake lives in main (issue #363), not in workspacePrefs.
+  const keepAwake = useKeepAwake();
   // Which layout id was just overwritten, for a transient "Saved" confirmation
   // next to its button — unlike "+ Save as new preset", overwriting an
   // existing row changes data invisibly (the row itself doesn't change shape).
@@ -402,14 +405,10 @@ export default function WorkspaceSettings() {
         <label className="settings-label">{t('settings.workspacePanel.keepAwakeMode', 'Keep computer awake')}</label>
         <select
           className="settings-select"
-          value={workspacePrefs.keepAwakeMode ?? 'smart'}
-          onChange={(e) => {
-            const mode = e.target.value as KeepAwakeMode;
-            setWorkspacePrefs({ keepAwakeMode: mode });
-            window.wmux?.awake?.setMode?.(mode);
-          }}
+          value={keepAwake.state.mode}
+          onChange={(e) => keepAwake.setMode(e.target.value as KeepAwakeMode)}
         >
-          <option value="smart">{t('settings.workspacePanel.keepAwakeSmart', 'Smart (when agents are active)')}</option>
+          <option value="smart">{t('settings.workspacePanel.keepAwakeSmart', 'Smart (when agents are working)')}</option>
           <option value="always">{t('settings.workspacePanel.keepAwakeAlways', 'Always (keep awake while wmux is open)')}</option>
           <option value="off">{t('settings.workspacePanel.keepAwakeOff', 'Off (system defaults)')}</option>
         </select>
@@ -417,7 +416,7 @@ export default function WorkspaceSettings() {
       <p className="settings-hint">
         {t(
           'settings.workspacePanel.keepAwakeHint',
-          'Prevents Windows from sleeping while coding agents are working. Smart mode automatically blocks sleep while agents are active, and releases it when idle or blocked on human input.',
+          'Prevents Windows from sleeping while coding agents are working. Smart mode only engages for agents that report a working state through hooks — Claude Code, Qwen Code, Grok, the OpenCode plugin, or `wmux report-agent` — and releases it when they are idle or waiting on you. A working claim not renewed for 15 minutes stops counting.',
         )}
       </p>
 
@@ -426,12 +425,8 @@ export default function WorkspaceSettings() {
         <input
           type="checkbox"
           className="settings-toggle"
-          checked={workspacePrefs.preventDisplaySleep ?? false}
-          onChange={(e) => {
-            const prevent = e.target.checked;
-            setWorkspacePrefs({ preventDisplaySleep: prevent });
-            window.wmux?.awake?.setPreventDisplaySleep?.(prevent);
-          }}
+          checked={keepAwake.state.preventDisplaySleep}
+          onChange={(e) => keepAwake.setPreventDisplaySleep(e.target.checked)}
         />
       </div>
       <p className="settings-hint">

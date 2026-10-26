@@ -160,12 +160,12 @@ function applyUserConfigWorkspace(state: any, workspace: any): void {
   // same pref block. 0 is a legitimate value — it means "never" — so the guard
   // is on the TYPE, not on truthiness.
   if (typeof workspace.snapshotMinutes === 'number') patch.sessionSnapshotMinutes = workspace.snapshotMinutes;
+  // Keep-awake is MAIN's state (issue #363): pushed there, never into the
+  // store. Main persists it and tells every window.
   if (workspace.keepAwake?.mode) {
-    patch.keepAwakeMode = workspace.keepAwake.mode;
     (window as any).wmux?.awake?.setMode?.(workspace.keepAwake.mode);
   }
   if (typeof workspace.keepAwake?.preventDisplaySleep === 'boolean') {
-    patch.preventDisplaySleep = workspace.keepAwake.preventDisplaySleep;
     (window as any).wmux?.awake?.setPreventDisplaySleep?.(workspace.keepAwake.preventDisplaySleep);
   }
   if (Object.keys(patch).length) state.setWorkspacePrefs(patch);

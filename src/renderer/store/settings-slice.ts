@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { QuickLaunchProfile, SavedLayout, KeepAwakeMode } from '../../shared/types';
+import { QuickLaunchProfile, SavedLayout } from '../../shared/types';
 import { DEFAULT_INACTIVE_PANE_DIM_PCT } from '../../shared/inactive-pane-dim';
 import { INDEX_MODIFIER_CHOICES, IndexModifiers, reconcileIndexModifiers } from '../utils/index-shortcuts';
 import { bindingsEqual } from '../utils/shortcut-binding';
@@ -587,10 +587,6 @@ export interface WorkspacePrefs {
    * Off by default — every such pane starts an agent at once.
    */
   restoreOmpSessions: boolean;
-  /** Keep computer awake mode: 'smart' (default) | 'always' | 'off' */
-  keepAwakeMode: KeepAwakeMode;
-  /** Whether to prevent display sleep in addition to system sleep */
-  preventDisplaySleep: boolean;
   /**
    * How many terminal panes a new workspace opens with, and how they sit
    * (issue #212).
@@ -647,8 +643,6 @@ export const DEFAULT_WORKSPACE_PREFS: WorkspacePrefs = {
   restoreAgySessions: false,
   restoreQwenSessions: false,
   restoreOmpSessions: false,
-  keepAwakeMode: 'smart',
-  preventDisplaySleep: false,
   detectAgentScreens: true,
   newWorkspacePanes: 3,
   newWorkspaceLayout: 'grid',
