@@ -1538,8 +1538,18 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
   ipcMain.handle(
     IPC_CHANNELS.TERMINAL_RESOLVE_FILE_LINK,
     async (event, surfaceId: unknown, text: unknown) => {
+      // explorerRootFor answers `no_root` BEFORE it asks about ssh, and a
+      // managed `wmux ssh` pane never reports a cwd — so a pane with no root
+      // is checked for ownership and ssh here, or its remote output would be
+      // probed as local absolute paths.
+      if (!ownsLiveSurface(surfaceId, event.sender)) {
+        return { error: 'No working directory reported for this pane', code: 'no_root' };
+      }
+      if (sshDetector.detect(surfaceId as SurfaceId)) {
+        return { error: 'This pane is inside an SSH session', code: 'remote' };
+      }
       const root = explorerRootFor(surfaceId, event.sender);
-      if ('error' in root && root.code === 'remote') return root;
+      if ('error' in root && root.code !== 'no_root') return root;
       return resolveTerminalFileLink('error' in root ? null : root.realRoot, text);
     },
   );

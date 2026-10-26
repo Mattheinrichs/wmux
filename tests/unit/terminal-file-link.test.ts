@@ -91,6 +91,20 @@ describe('resolveTerminalFileLink without a root', () => {
   });
 });
 
+describe('resolveTerminalFileLink never reaches the network', () => {
+  // Hover runs this on terminal output a remote host controls: a UNC stat is
+  // an SMB connection (NTLM leak) and a main-loop stall on a dead host.
+  it.each([
+    String.raw`\\evil\share\a.md`,
+    '//evil/share/a.md',
+    String.raw`\\?\C:\x.md`,
+    String.raw`\\.\pipe\x.md`,
+  ])('refuses %s with or without a root', async (text) => {
+    expect(await resolveTerminalFileLink(root, text)).toMatchObject({ code: 'outside_root' });
+    expect(await resolveTerminalFileLink(null, text)).toMatchObject({ code: 'outside_root' });
+  });
+});
+
 describe('resolveTerminalFileLink input checks', () => {
   it.each([
     ['a number', 42],

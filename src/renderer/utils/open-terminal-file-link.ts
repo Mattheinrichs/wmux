@@ -35,5 +35,9 @@ export async function openTerminalFileLink(surfaceId: SurfaceId, path: string): 
     });
     if (failure !== 'binary' && failure !== 'too_large') return;
   }
-  await window.wmux?.explorer?.openInApp?.(surfaceId, target.relPath);
+  // Never launch the default app from a terminal link: the text is whatever a
+  // repo, a remote host or an agent printed, and a Ctrl+click on a .docm or an
+  // .iso would run or mount it in one gesture. The explorer's "Open in default
+  // app" stays a deliberate menu choice; here the file is only revealed.
+  await window.wmux?.explorer?.reveal?.(surfaceId, target.relPath);
 }
