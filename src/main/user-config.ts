@@ -51,6 +51,9 @@
  *   upload-on-paste = true     # scp a pasted image to the host an ssh pane is on
  *   upload-on-drop  = true     # same for a dropped file; hold Shift to invert per-drop
  *
+ *   [paste]
+ *   downscale-images = true    # shrink a pasted image to what Claude Code keeps (issue #381)
+ *
  *   [keys]                     # remap what a key sends to the terminal (issue #146)
  *   "ctrl+k"     = "<C-k><Delete>"
  *   "ctrl+alt+r" = "clear<CR>"
@@ -146,6 +149,14 @@ export interface UserConfig {
   remote?: {
     uploadOnPaste?: boolean;
     uploadOnDrop?: boolean;
+  };
+  /**
+   * Clipboard paste (issue #381). `downscaleImages` defaults to true: a pasted
+   * image is shrunk to the largest size Claude Code would keep before it is
+   * written. False keeps every pixel.
+   */
+  paste?: {
+    downscaleImages?: boolean;
   };
   /**
    * User key remaps (issue #146) — chord → bytes the terminal should send.
@@ -614,6 +625,24 @@ function mapRemoteSection(root: TomlTable, errors: string[]): NonNullable<UserCo
 }
 
 /**
+ * Clipboard paste: `[paste] downscale-images = bool` (issue #381).
+ *
+ * The opt-out for the downscale: the size Claude Code resizes to is the
+ * default because that is what reads most pasted screenshots, but a pane may
+ * hold something else that wants the full resolution.
+ */
+function mapPasteSection(root: TomlTable, errors: string[]): NonNullable<UserConfig['paste']> | undefined {
+  const paste = asTable(root.paste);
+  if (!paste) return undefined;
+
+  const raw = paste['downscale-images'] ?? paste.downscaleImages;
+  const downscale = asBool(raw);
+  if (downscale !== undefined) return { downscaleImages: downscale };
+  if (raw !== undefined) errors.push('paste.downscale-images: expected boolean');
+  return undefined;
+}
+
+/**
  * Key remaps: `[keys] "ctrl+k" = "<C-k><Delete>"` (issue #146).
  *
  * Parsing happens here rather than in the renderer so the errors land in the
@@ -648,6 +677,9 @@ function mapToConfig(root: TomlTable, errors: string[]): UserConfig {
 
   const remote = mapRemoteSection(root, errors);
   if (remote) out.remote = remote;
+
+  const paste = mapPasteSection(root, errors);
+  if (paste) out.paste = paste;
 
   const keys = mapKeysSection(root, errors);
   if (keys) out.keys = keys;

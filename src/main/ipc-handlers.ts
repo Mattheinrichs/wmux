@@ -12,6 +12,7 @@ import { agentIdentity } from './agent-identity';
 import { setDetection, forgetDetection, activeManifests } from './detection-store';
 import {
   readClipboardSource,
+  materializeClipboard,
   regularFilePaths,
   resolveInsertion,
   SurfaceInsertionQueue,
@@ -1108,10 +1109,18 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
       if (!ownsLiveSurface(surfaceId, event.sender)) return { text: null };
       // Snapshot before queueing: a slow earlier upload must not make this
       // gesture read whatever happens to be on the clipboard later.
-      const source = readClipboardSource();
+      const snapshot = readClipboardSource({
+        downscaleImages: loadUserConfig().paste?.downscaleImages !== false,
+      });
+      // The image is encoded and written now, not behind an earlier gesture's
+      // upload — but only the queue decides when its path is typed (#381).
+      // The catch only keeps a failed write that a cancelled queue never
+      // awaits from being an unhandled rejection; the task still sees it.
+      const ready = materializeClipboard(snapshot);
+      ready.catch(() => undefined);
       return insertionQueue.enqueue(
         surfaceId,
-        (signal) => resolveFor(surfaceId, source, 'paste', false, signal),
+        async (signal) => resolveFor(surfaceId, await ready, 'paste', false, signal),
       );
     },
   );
