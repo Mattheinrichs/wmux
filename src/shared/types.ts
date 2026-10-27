@@ -890,6 +890,10 @@ export const IPC_CHANNELS = {
   MARKDOWN_SAVE_FILE: 'markdown:save-file',
   MARKDOWN_SAVE_AS: 'markdown:save-as',
   MARKDOWN_STAT_FILE: 'markdown:stat-file',
+  // Issue #380 — a local image a markdown document names, read by main and
+  // returned as a data: URL. Image types only, by extension AND bytes; see
+  // main/markdown-image.ts for why the document path is a base, not a grant.
+  MARKDOWN_READ_IMAGE: 'markdown:read-image',
   // File explorer: directory enumeration, jailed to the surface's root in main.
   EXPLORER_LIST_DIR: 'explorer:list-dir',
   // Per-file change counts for the tree's +N/-N column. Takes a surfaceId and

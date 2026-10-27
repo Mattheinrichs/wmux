@@ -346,6 +346,58 @@
   border-radius: 4px;
 }
 
+/* ─── Math, diagrams, local images (#380) ─────────────────────────────────────
+   Placeholders from markdown-document.ts, filled by markdown-hydrate.ts. Until
+   then (or when KaTeX/mermaid fails) they show their source, monospaced. */
+
+.markdown-pane__math:not(:has(.katex)) {
+  font-family: 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 13px;
+}
+
+.markdown-pane__math--display {
+  display: block;
+  margin: 12px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-pane__math--error {
+  color: #f48771;
+}
+
+.markdown-pane__mermaid {
+  margin-bottom: 16px;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 12.5px;
+}
+
+.markdown-pane__mermaid:has(.markdown-pane__mermaid-img) {
+  white-space: normal;
+  text-align: center;
+}
+
+.markdown-pane__content .markdown-pane__mermaid-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0;
+}
+
+.markdown-pane__mermaid-message {
+  color: #f48771;
+  white-space: normal;
+  margin-bottom: 6px;
+}
+
+/* A local image main refused or could not read: the browser shows the alt
+   text; the reason is in the tooltip. */
+.markdown-pane__image--failed {
+  outline: 1px dashed rgba(var(--ui-overlay-rgb, 255, 255, 255), 0.3);
+  padding: 2px 4px;
+}
+
 .markdown-pane__content hr {
   border: none;
   border-top: 1px solid #333;

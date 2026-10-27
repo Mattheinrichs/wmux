@@ -62,6 +62,7 @@ import {
   MD_DIALOG_EXTENSIONS,
 } from './markdown-file';
 import { grantFilePath, isFilePathGranted } from './file-grants';
+import { readMarkdownImage } from './markdown-image';
 import { getAwakeManager, isKeepAwakeMode } from './awake-manager';
 import { agentBrowserPath, runAgentBrowser, unwrapAgentData, type RunResult } from './agent-browser-cli';
 // The process-wide singletons. Constructing a second SessionRegistry or
@@ -1347,6 +1348,14 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
   // "changed on disk?" check, which needs the mtime and not the content.
   ipcMain.handle(IPC_CHANNELS.MARKDOWN_STAT_FILE, async (_event, filePath: string) => {
     return statMarkdownFile(filePath);
+  });
+
+  // Markdown images (issue #380). Read-only, mints nothing, and image types
+  // only — markdown-image.ts holds the whole policy, including why the
+  // renderer-supplied document path is a base and not a permission.
+  ipcMain.handle(IPC_CHANNELS.MARKDOWN_READ_IMAGE, async (_event, documentPath: unknown, src: unknown) => {
+    if (typeof src !== 'string') return { error: 'No image path', code: 'no_path' };
+    return readMarkdownImage(typeof documentPath === 'string' ? documentPath : null, src);
   });
 
   // ─── File explorer and code viewer ─────────────────────────────────────────

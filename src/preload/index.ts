@@ -398,6 +398,11 @@ contextBridge.exposeInMainWorld('wmux', {
       ipcRenderer.invoke(IPC_CHANNELS.MARKDOWN_SAVE_FILE, filePath, content, expectedMtimeMs),
     saveAs: (content: string, suggestedName?: string, defaultDir?: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKDOWN_SAVE_AS, content, suggestedName, defaultDir),
+    // A local image the document names (#380). `documentPath` is only the base
+    // a relative src resolves against (null for a pathless surface); main
+    // re-checks the image's type and bytes whatever it is given.
+    readImage: (documentPath: string | null, src: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKDOWN_READ_IMAGE, documentPath, src),
   },
   explorer: {
     // The renderer sends a surfaceId and a RELATIVE path — never an absolute

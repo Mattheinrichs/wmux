@@ -21,7 +21,7 @@ const md = new Marked({ gfm: true, breaks: true });
 // Registered here, next to the instance and the sanitize policy it exists to
 // work around: the renderer and the FORBID_TAGS list are one decision, and
 // splitting them across modules is how one gets changed without the other.
-md.use({
+export const taskListExtension = {
   renderer: {
     checkbox({ checked }: { checked: boolean }) {
       return checked
@@ -29,7 +29,8 @@ md.use({
         : '<span class="markdown-pane__task">☐</span> ';
     },
   },
-});
+};
+md.use(taskListExtension);
 
 /**
  * Markdown → HTML that is safe to hand `dangerouslySetInnerHTML`.
@@ -47,7 +48,17 @@ md.use({
  */
 export function renderMarkdown(content: string): string {
   if (!content) return '';
-  return DOMPurify.sanitize(md.parse(content) as string, {
+  return sanitizeMarkdownHtml(md.parse(content) as string);
+}
+
+/**
+ * The sanitize policy itself, shared with the markdown PANE's richer renderer
+ * (markdown-document.ts, #380) so there is one policy and not two. That
+ * renderer is a separate Marked instance on purpose: this one also renders the
+ * changelog (ChangelogSettings), where "$5" is prose and must stay prose.
+ */
+export function sanitizeMarkdownHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     // `style` blocks and form controls are not content — they are ways to
     // restyle the app around the pane, or to put a convincing prompt inside it.
