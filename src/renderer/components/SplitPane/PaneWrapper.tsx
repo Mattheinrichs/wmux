@@ -300,6 +300,9 @@ export default function PaneWrapper({
             <BrowserPane
               surfaceId={surface.id}
               workspaceId={workspaceId}
+              // The layer above hides it; BrowserPane needs to know so a pane
+              // an agent drives can keep painting meanwhile.
+              visible={isVisible}
               // Remembered page, then the configured Start page, then blank.
               // The Start page link is new in #232: a browser TAB used to skip
               // `browserPrefs.defaultUrl` entirely and go straight to

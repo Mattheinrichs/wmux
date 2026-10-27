@@ -800,3 +800,41 @@ describe('handleBrowserV2 error codes', () => {
     expect(answer.message).toBe('Could not open browser panel');
   });
 });
+
+/**
+ * A web pane an agent drives keeps painting while the user is on another
+ * workspace (browser-keep-rendering.ts). The lease is renewed by the runner,
+ * the one place both the single-command and the batch path go through.
+ */
+describe('runBrowserCommandForTarget — keeps a hidden web pane painting', () => {
+  it('renews the lease before the verb runs, so a screenshot finds the pane painting', async () => {
+    const order: string[] = [];
+    const bridge = makeBridge();
+    bridge.screenshot.mockImplementation(async () => { order.push('screenshot'); return 'BASE64'; });
+    const keepRendering = vi.fn(async (wcId: number) => { order.push(`lease ${wcId}`); });
+    await runBrowserCommandForTarget('browser.screenshot', {}, web(7), { ...deps(bridge), keepRendering });
+    expect(order).toEqual(['lease 7', 'screenshot']);
+  });
+
+  it('renews it for every web verb, not only screenshots', async () => {
+    const keepRendering = vi.fn(async () => {});
+    const d = { ...deps(makeBridge()), keepRendering };
+    for (const [method, params] of ALL_VERBS) await runBrowserCommandForTarget(method, params, web(5), d);
+    expect(keepRendering).toHaveBeenCalledTimes(ALL_VERBS.length);
+    expect(keepRendering.mock.calls.every(([wcId]) => wcId === 5)).toBe(true);
+  });
+
+  it('never for the agent engine, whose pages a real Chrome paints', async () => {
+    const keepRendering = vi.fn(async () => {});
+    const runAgent = vi.fn(async () => ok({ url: 'https://a' }));
+    await runBrowserCommandForTarget('browser.navigate', { url: 'https://a' }, agent(), { ...deps(makeBridge(), runAgent), keepRendering });
+    expect(keepRendering).not.toHaveBeenCalled();
+  });
+
+  it('runs the verb anyway when the lease cannot be granted', async () => {
+    const bridge = makeBridge();
+    const keepRendering = vi.fn(async () => { throw new Error('renderer went away'); });
+    const res = await runBrowserCommandForTarget('browser.eval', { js: '1+1' }, web(7), { ...deps(bridge), keepRendering });
+    expect(res).toEqual({ result: 42 });
+  });
+});

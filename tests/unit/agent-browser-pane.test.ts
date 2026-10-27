@@ -8,6 +8,7 @@ import {
   elementHidden,
   resolveInputUrl,
   shouldPollAgentUrl,
+  webviewHiding,
   AGENT_URL_POLL_MS,
   AGENT_URL_POLL_SUPPRESS_MS,
 } from '../../src/renderer/components/Browser/BrowserPane';
@@ -421,7 +422,19 @@ describe('AgentBrowserSetup', () => {
     // it. What this pins is that the webview is always RENDERED and only ever
     // made invisible — the condition is free to grow, a `{overlay && <webview`
     // is the regression.
-    expect(PANE_CODE).toMatch(/style=\{overlay \|\| isBlank \? \{ visibility: 'hidden' \} : undefined\}/);
+    //
+    // The style now comes from `webviewHiding`, which also keeps a hidden pane
+    // an agent drives painting (browser-keep-rendering.ts). Behind the card and
+    // on a blank page it still only hides, on screen or off, lease or not.
+    expect(PANE_CODE).toMatch(/\{\.\.\.webviewHiding\(\{ overlay, isBlank, isAgent, visible, keepRendering \}\)\}/);
+    for (const visible of [true, false]) {
+      for (const keepRendering of [true, false]) {
+        expect(webviewHiding({ overlay: true, isBlank: false, isAgent: true, visible, keepRendering }))
+          .toEqual({ style: { visibility: 'hidden' } });
+        expect(webviewHiding({ overlay: false, isBlank: true, isAgent: false, visible, keepRendering }))
+          .toEqual({ style: { visibility: 'hidden' } });
+      }
+    }
     expect(PANE_CODE).not.toMatch(/&&\s*<webview/);
   });
 

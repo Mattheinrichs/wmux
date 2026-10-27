@@ -11,6 +11,7 @@ import { toRemoteRosterSource } from './utils/remote-roster';
 import { selectWorkspaceLabels } from './components/SplitPane/use-osc-title';
 import { openLinkFromBridge } from './utils/open-link';
 import { readScreenReport } from './utils/screen-report';
+import { grantKeepRendering } from './utils/browser-keep-rendering';
 import { PaneId, SurfaceId, WorkspaceId, SurfaceType, engineOf, type BrowserEngine, type WorkspaceLayout, type WorktreeMetadata } from '../shared/types';
 import { promptSummary, type PromptEntry, type PromptSource } from './store/prompt-slice';
 import { v4 as uuid } from 'uuid';
@@ -258,6 +259,17 @@ export function initPipeBridge(): void {
       }
     }
     return false;
+  };
+
+  /**
+   * An agent just drove this browser surface: keep it painting for `ms` even
+   * while it is hidden (utils/browser-keep-rendering.ts). Answers true so main
+   * knows the lease was taken; any id is accepted, because the browser panel's
+   * `browser-<workspace>` surfaces are not in the split tree.
+   */
+  w.__wmux_keepBrowserRendering = (surfaceId: string, ms: number): boolean => {
+    grantKeepRendering(surfaceId, ms);
+    return true;
   };
 
   // ─── Pane ───────────────────────────────────────────────────────────────────

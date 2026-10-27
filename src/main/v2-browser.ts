@@ -26,6 +26,7 @@ import { agentBrowserPath, runAgentBrowser, unwrapAgentData, type RunResult } fr
 import { acquireDashboardFor, sessionRegistry } from './agent-browser-runtime';
 import type { AgentSession } from './agent-browser-session';
 import { toAgentBrowserArgv } from './agent-browser-verbs';
+import { keepRenderingLeases } from './browser-keep-rendering';
 import type { BrowserEngine, SurfaceId } from '../shared/types';
 
 type Respond = (result: any) => void;
@@ -51,6 +52,12 @@ export type BrowserTarget =
 export interface BrowserDeps {
   bridge: typeof cdpBridge;
   runAgent: (argv: string[], timeoutMs: number) => Promise<RunResult>;
+  /**
+   * An agent is driving this web pane: keep it painting while it is hidden
+   * (browser-keep-rendering.ts). Optional, so fakes that do not care need not
+   * provide it.
+   */
+  keepRendering?: (wcId: number) => Promise<void>;
 }
 
 function firstWindow(): BrowserWindow | null {
@@ -478,6 +485,10 @@ export async function runBrowserCommandForTarget(
 
   const { wcId } = target;
   const bridge = deps.bridge;
+  // Before the verb, so a pane on another workspace is painting again by the
+  // time a screenshot waits for its frame. A lease that cannot be granted
+  // leaves the verb to run exactly as it did before leases existed.
+  if (deps.keepRendering) await deps.keepRendering(wcId).catch(() => {});
   switch (method) {
     case 'browser.navigate':
       await bridge.navigate(params?.url, params?.timeout, wcId);
@@ -559,6 +570,7 @@ const defaultDeps: BrowserDeps = {
     }
     return runAgentBrowser(binary, argv, timeoutMs);
   },
+  keepRendering: async (wcId) => keepRenderingLeases.touch(wcId, cdpBridge.surfaceIdFor(wcId)),
 };
 
 async function handleBrowserBatch(params: any, respond: Respond, respondError: RespondError): Promise<void> {
