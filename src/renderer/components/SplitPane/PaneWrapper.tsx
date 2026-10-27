@@ -42,6 +42,8 @@ interface PaneWrapperProps {
    * which is portalled from TerminalHost (#346), so the terminal slot calls it.
    */
   onActivate?: () => void;
+  /** Focus another pane — the one a split from this pane's tab bar just created. */
+  onFocusPane?: (paneId: PaneId) => void;
 }
 
 export default function PaneWrapper({
@@ -55,6 +57,7 @@ export default function PaneWrapper({
   onClearSurfaceDragPreview,
   onSurfaceDragCommit,
   onActivate,
+  onFocusPane,
 }: PaneWrapperProps) {
   const { surfaces, activeSurfaceIndex, paneId } = leaf;
 
@@ -532,27 +535,25 @@ export default function PaneWrapper({
     }
   };
 
-  const handleSplitRight = () => {
+  const splitAndFocus = (direction: 'horizontal' | 'vertical') => {
     if (!activeWorkspaceId) return;
     const { workspaces, updateSplitTree } = useStore.getState();
     const ws = workspaces.find(w => w.id === activeWorkspaceId);
     if (ws) {
       const newPaneId = `pane-${crypto.randomUUID()}` as PaneId;
-      const newTree = splitNode(ws.splitTree, paneId, newPaneId, 'terminal', 'horizontal');
+      const newTree = splitNode(ws.splitTree, paneId, newPaneId, 'terminal', direction);
       updateSplitTree(activeWorkspaceId, newTree);
+      // Deferred, not called inline: the button's click goes on to bubble up to
+      // the leaf's onClick in SplitContainer (the layout menu too — portals
+      // bubble through the React tree), which focuses THIS pane. Both updates
+      // land in one batch and the last one wins, so an inline call would hand
+      // focus straight back to the pane that was split.
+      queueMicrotask(() => onFocusPane?.(newPaneId));
     }
   };
 
-  const handleSplitDown = () => {
-    if (!activeWorkspaceId) return;
-    const { workspaces, updateSplitTree } = useStore.getState();
-    const ws = workspaces.find(w => w.id === activeWorkspaceId);
-    if (ws) {
-      const newPaneId = `pane-${crypto.randomUUID()}` as PaneId;
-      const newTree = splitNode(ws.splitTree, paneId, newPaneId, 'terminal', 'vertical');
-      updateSplitTree(activeWorkspaceId, newTree);
-    }
-  };
+  const handleSplitRight = () => splitAndFocus('horizontal');
+  const handleSplitDown = () => splitAndFocus('vertical');
 
   const handleClosePane = () => {
     if (!activeWorkspaceId) return;
