@@ -892,6 +892,8 @@ export const cs: Translation = {
   'settings.workspacePanel.restoreOmpSessions': 'Pokračovat v relacích omp při obnovení',
   'settings.workspacePanel.restoreOmpSessionsHint':
     'Znovu otevře konkrétní relaci omp každé obnovené karty pomocí „omp --resume <path>“ v původním adresáři. Vyžaduje rozšíření wmux pro omp (zapnuté stavové hooky). Běžně ukončené relace omp se neotevřou. Pokud byl soubor relace mezitím smazán, obnovení se přeskočí a nová relace se nevytvoří.',
+  'settings.workspacePanel.restorePiSessions': 'Pokračovat v relacích pi při obnovení',
+  'settings.workspacePanel.restorePiSessionsHint': "Znovu otevře konkrétní relaci pi každé obnovené karty pomocí „pi --session <path>“ v původním adresáři. Vyžaduje rozšíření wmux pro pi (zapnuté stavové hooky). Relace se zaznamená, jakmile ji pi zapíše (po první odpovědi). Ukončený pi se znovu neotevře; přepnutí relace pomocí /new, /resume nebo /fork zaznamená novou. Karty, jejichž soubor relace chybí nebo je prázdný, se přeskočí a nová relace se nevytvoří.",
   'settings.workspacePanel.restoreCodexSessionsHint':
     'Znovu otevře původní konverzaci Codex v každé obnovené kartě. Zapněte tuto volbu a poté spusťte codex v novém terminálu wmux. Vyžaduje Node.js a nativní Codex CLI pro Windows v PowerShellu nebo příkazovém řádku. Běžně ukončené relace se neotevřou.',
   'settings.workspacePanel.explorerOpenByDefault': 'Zobrazovat průzkumník souborů ve výchozím stavu',

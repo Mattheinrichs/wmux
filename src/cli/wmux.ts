@@ -2022,6 +2022,17 @@ const AGENT_STATE_COMMANDS = {
       print(await sendV2('pane.release_omp_session', { surfaceId, sessionId: getFlag(args, '--session') ?? null }));
       return;
     }
+    // pi's extension (#382): main releases only on a quit, only the file the
+    // shutdown names, and drops a release older than the pane's last report.
+    if (getFlag(args, '--provider') === 'pi') {
+      print(await sendV2('pane.release_pi_session', {
+        surfaceId,
+        sessionId: getFlag(args, '--session') ?? null,
+        reason: getFlag(args, '--reason') ?? null,
+        seq: seqFlag(args),
+      }));
+      return;
+    }
     print(await sendV2('pane.release_agent', { surfaceId, seq: seqFlag(args) }));
   },
   // No --surface → the whole picture, including a `blocked` list that answers
@@ -2330,7 +2341,7 @@ export const COMMAND_SPECS = {
     bool: ['--done'],
   },
   'report-session': {
-    usage: `wmux report-session <sessionId> [--provider claude|codex|opencode|agy|qwen|omp] [--seq N] [--surface <id>]   ${SURFACE_NOTE}`,
+    usage: `wmux report-session <sessionId> [--provider claude|codex|opencode|agy|qwen|omp|pi] [--seq N] [--surface <id>]   ${SURFACE_NOTE}`,
     value: ['--session', '--provider', '--seq', '--surface'],
   },
   'answer-agent': {
@@ -2338,8 +2349,8 @@ export const COMMAND_SPECS = {
     value: ['--surface', '--choice'],
   },
   'release-agent': {
-    usage: `wmux release-agent [--seq N] [--surface <id>] | --provider opencode|omp --session <id>   ${SURFACE_NOTE}`,
-    value: ['--seq', '--surface', '--provider', '--session'],
+    usage: `wmux release-agent [--seq N] [--surface <id>] | --provider opencode|omp --session <id> | --provider pi [--session <file>] [--reason <r>] [--seq N]   ${SURFACE_NOTE}`,
+    value: ['--seq', '--surface', '--provider', '--session', '--reason'],
   },
   'agent-state': {
     usage: 'wmux agent-state [--surface <id>]   (no --surface → every pane, the blocked list, and every identified agent)',

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
 import { pluginNeedsUpdate } from '../../src/main/agent-plugin-file';
 
 /**
@@ -330,7 +331,8 @@ describe('#231 pi extension: shutdown', () => {
 
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(verbs()).toEqual([['release-agent', '--surface', SURFACE]]);
+    expect(verbs()).toHaveLength(1);
+    expect(verbs()[0].slice(0, 7)).toEqual(['release-agent', '--surface', SURFACE, '--provider', 'pi', '--reason', 'quit']);
 
     calls[0].cb(null, '', '');
     await pending;
@@ -344,6 +346,126 @@ describe('#231 pi extension: shutdown', () => {
     const pending = pi.fire('session_shutdown', { reason: 'quit' });
     await vi.advanceTimersByTimeAsync(2500);
     await expect(pending).resolves.toBeUndefined();
+  });
+});
+
+describe('#382 pi extension: session file reports', () => {
+  let dir: string;
+  let file: string;
+  /** A ctx whose session manager names `name` — written or not. */
+  const ctxFor = (name: string) => ({ sessionManager: { getSessionFile: () => name } });
+  const sessionReports = () => verbs().filter((v) => v[0] === 'report-session');
+  const releases = () => verbs().filter((v) => v[0] === 'release-agent');
+  const seqOf = (argv: string[]) => Number(argv[argv.indexOf('--seq') + 1]);
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'pi-ext-382-'));
+    file = path.join(dir, 'session.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('updates installs: the marker moved past the version that did not report sessions', () => {
+    const source = readFileSync(EXTENSION, 'utf8');
+    expect(pluginNeedsUpdate(source, '// wmux-plugin-version: 2\nold source')).toBe(true);
+  });
+
+  it('does not report at session_start a file that does not exist yet', async () => {
+    const pi = await extensionWith();
+    await pi.fire('session_start', { reason: 'startup' }, ctxFor(file));
+    await pi.fire('turn_end', {}, ctxFor(file));
+    expect(sessionReports()).toEqual([]);
+  });
+
+  it('does not report an empty file: pi --session would open a new session in its place', async () => {
+    writeFileSync(file, '');
+    const pi = await extensionWith();
+    await pi.fire('turn_end', {}, ctxFor(file));
+    expect(sessionReports()).toEqual([]);
+  });
+
+  it('reports once the first reply has written the file, then not again', async () => {
+    const pi = await extensionWith();
+    await pi.fire('session_start', { reason: 'startup' }, ctxFor(file));
+    writeFileSync(file, '{"type":"session"}\n');
+    await pi.fire('turn_end', {}, ctxFor(file));
+    await pi.fire('turn_end', {}, ctxFor(file));
+    await pi.fire('agent_settled', {}, ctxFor(file));
+    const reports = sessionReports();
+    expect(reports).toHaveLength(1);
+    expect(reports[0].slice(0, 4)).toEqual(['report-session', file, '--provider', 'pi']);
+    expect(reports[0].slice(-2)).toEqual(['--surface', SURFACE]);
+  });
+
+  it('reports a resumed or forked session at session_start, its file already on disk', async () => {
+    writeFileSync(file, '{"type":"session"}\n');
+    const pi = await extensionWith();
+    await pi.fire('session_start', { reason: 'resume' }, ctxFor(file));
+    expect(sessionReports()).toHaveLength(1);
+  });
+
+  it('retries a report whose call failed instead of remembering it as sent', async () => {
+    writeFileSync(file, '{"type":"session"}\n');
+    holdCallbacks = true;
+    const pi = await extensionWith();
+    await pi.fire('turn_end', {}, ctxFor(file));
+    calls[0].cb(new Error('pipe busy'));
+    await pi.fire('turn_end', {}, ctxFor(file));
+    expect(sessionReports()).toHaveLength(2);
+  });
+
+  it('stamps strictly increasing seqs, across rebound instances too', async () => {
+    writeFileSync(file, '{"type":"session"}\n');
+    const other = path.join(dir, 'other.jsonl');
+    writeFileSync(other, '{"type":"session"}\n');
+    const first = await extensionWith();
+    await first.fire('turn_end', {}, ctxFor(file));
+    // /new rebinds the extension: a NEW instance, the same module.
+    const second = await extensionWith();
+    await second.fire('turn_end', {}, ctxFor(other));
+    await second.fire('session_shutdown', { reason: 'quit' }, ctxFor(other));
+    const seqs = [...sessionReports(), ...releases()].map(seqOf);
+    expect(seqs.every(Number.isSafeInteger)).toBe(true);
+    expect(seqs[1]).toBeGreaterThan(seqs[0]);
+    expect(seqs[2]).toBeGreaterThan(seqs[1]);
+  });
+
+  it('derives seqs from the clock, so a new pi in the pane starts above an older one', async () => {
+    const { nextSeq } = (await load()).default.__wmuxInternals;
+    const later = Date.now() + 60_000;
+    expect(nextSeq(later)).toBe(later * 1000);
+    expect(nextSeq(later)).toBe(later * 1000 + 1);
+  });
+
+  it.each(['reload', 'new', 'resume', 'fork'])('sends no release on a %s: the next session reports its own file', async (reason) => {
+    writeFileSync(file, '{"type":"session"}\n');
+    const pi = await extensionWith();
+    await pi.fire('session_shutdown', { reason }, ctxFor(file));
+    expect(releases()).toEqual([]);
+  });
+
+  it('names the file it is leaving on a quit, so wmux clears only that one', async () => {
+    const pi = await extensionWith();
+    await pi.fire('session_shutdown', { reason: 'quit' }, ctxFor(file));
+    const [release] = releases();
+    expect(release.slice(0, 9)).toEqual([
+      'release-agent', '--surface', SURFACE, '--provider', 'pi', '--reason', 'quit', '--session', file,
+    ]);
+    expect(Number.isSafeInteger(seqOf(release))).toBe(true);
+  });
+
+  it('treats a shutdown with no reason (older pi) as a quit', async () => {
+    const pi = await extensionWith();
+    await pi.fire('session_shutdown', {}, {});
+    expect(releases()).toHaveLength(1);
+    expect(releases()[0]).not.toContain('--session');
+  });
+
+  it('survives a session manager that throws', async () => {
+    const pi = await extensionWith();
+    const ctx = { sessionManager: { getSessionFile: () => { throw new Error('boom'); } } };
+    await expect(pi.fire('turn_end', {}, ctx)).resolves.toBeUndefined();
+    await expect(pi.fire('session_shutdown', { reason: 'quit' }, ctx)).resolves.toBeUndefined();
+    expect(sessionReports()).toEqual([]);
   });
 });
 

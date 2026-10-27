@@ -6,6 +6,7 @@ import { stampAgySessionIds } from './agy-resume';
 import { stampQwenSessionIds } from './qwen-resume';
 import type { AgentSessionProvider } from './agent-state';
 import { stampOmpSessionIds } from './omp-resume';
+import { stampPiSessionFiles } from './pi-resume';
 import type { SurfaceId } from '../shared/types';
 
 /**
@@ -47,5 +48,6 @@ export function stampAgentSessionIds<T>(tree: T): T {
   const opencode = stampOpencodeSessionIds(codex, providerLookup('opencode'));
   const agy = stampAgySessionIds(opencode, providerLookup('agy'));
   const qwen = stampQwenSessionIds(agy, providerLookup('qwen'));
-  return stampOmpSessionIds(qwen, providerLookup('omp'));
+  const omp = stampOmpSessionIds(qwen, providerLookup('omp'));
+  return stampPiSessionFiles(omp, providerLookup('pi'));
 }

@@ -19,6 +19,7 @@ import {
   reportAgentSession,
   reportMetadata,
   releaseAgent,
+  releasePiWithoutRecord,
   noteMissingSession,
   answerAgent,
   sanitizeChoices,
@@ -29,6 +30,7 @@ import {
   type AnswerFailure,
 } from './agent-state';
 import { agentIdentity } from './agent-identity';
+import { piSessionSeqs, decidePiShutdown, isPiQuitReason } from './pi-resume';
 import type { DeliverAnswerReason } from './remote-console/contract';
 import { CHOICE_ID_RE } from '../shared/remote-console-protocol';
 
@@ -141,10 +143,10 @@ function withIdentity<T extends { surfaceId: string; sessionId?: string | null; 
   agentSource: string | null;
 } {
   const identity = agentIdentity.identify(snapshot.surfaceId);
-  // Only Codex and omp override: identity already names a Claude pane, and taking
-  // every Claude session report as the source would change `agentSource` for
-  // panes this feature has nothing to do with.
-  const reported = snapshot.sessionId && (snapshot.sessionProvider === 'codex' || snapshot.sessionProvider === 'omp')
+  // Only Codex, omp and pi override: identity already names a Claude pane, and
+  // taking every Claude session report as the source would change `agentSource`
+  // for panes this feature has nothing to do with.
+  const reported = snapshot.sessionId && (snapshot.sessionProvider === 'codex' || snapshot.sessionProvider === 'omp' || snapshot.sessionProvider === 'pi')
     ? snapshot.sessionProvider
     : undefined;
   return { ...snapshot, agent: reported ?? identity?.kind ?? null, agentSource: reported ? 'session' : identity?.source ?? null };
@@ -230,9 +232,12 @@ const HANDLERS: Record<string, (surfaceId: SurfaceId, p: any) => any> = {
     };
   },
 
-  'pane.report_agent_session': (surfaceId, p) => ({
-    accepted: !!reportAgentSession(surfaceId, { seq: p.seq, sessionId: p.sessionId ?? null, provider: p.provider }),
-  }),
+  'pane.report_agent_session': (surfaceId, p) => {
+    // pi's reports race its own quit across processes (#382): the gate keeps
+    // the newest seq per surface even after the quit forgot the record.
+    if (p.provider === 'pi' && !piSessionSeqs.accept(surfaceId, p.seq)) return { accepted: false };
+    return { accepted: !!reportAgentSession(surfaceId, { seq: p.seq, sessionId: p.sessionId ?? null, provider: p.provider }) };
+  },
 
   // Distinct verbs keep the Codex launcher inert against older wmux instances.
   'pane.report_codex_session': (surfaceId, p) => ({
@@ -266,6 +271,26 @@ const HANDLERS: Record<string, (surfaceId: SurfaceId, p: any) => any> = {
     if (current?.sessionId && current.sessionProvider !== 'omp') return { released: false };
     if (p.sessionId && current?.sessionId && current.sessionId !== p.sessionId) return { released: false };
     return { released: releaseAgent(surfaceId) };
+  },
+
+  // pi's session_shutdown (#382). Only a quit releases — `/new`, `/resume`,
+  // `/fork` and `/reload` fire it too, and the next session reports its own
+  // file — and only the file the shutdown names, so a late quit from an older
+  // session cannot take the current one. Refused while wmux quits (index.ts).
+  'pane.release_pi_session': (surfaceId, p) => {
+    const named = typeof p.sessionId === 'string' && p.sessionId ? p.sessionId : null;
+    const current = getAgentState(surfaceId);
+    const decision = decidePiShutdown({
+      reason: p.reason,
+      seqAccepted: isPiQuitReason(p.reason) && piSessionSeqs.accept(surfaceId, p.seq),
+      named,
+      current: current ? { provider: current.sessionProvider, sessionId: current.sessionId } : null,
+    });
+    if (decision !== 'release') return { released: false, decision };
+    // A restored pi quit before it re-reported: no record, but the handle in
+    // session.json is still the one being left.
+    const released = current ? releaseAgent(surfaceId) : named !== null && releasePiWithoutRecord(surfaceId);
+    return { released, decision };
   },
 
   'pane.report_metadata': (surfaceId, p) => ({

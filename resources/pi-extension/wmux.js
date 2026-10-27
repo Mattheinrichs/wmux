@@ -1,4 +1,4 @@
-// wmux-plugin-version: 2
+// wmux-plugin-version: 3
 // wmux pi extension — bridges pi's lifecycle events to the wmux sidebar (#231).
 // Auto-installed by wmux to ~/.pi/agent/extensions/wmux.js.
 // No-ops entirely outside wmux (WMUX !== '1').
@@ -49,8 +49,26 @@
 // never the options — and wmux's back-channel relays bytes the AGENT named
 // (agent-state.ts), so a choice wmux invented would be a button that sends the
 // wrong key. A blocked pane with no buttons is still the signal that matters.
+//
+// ── Session restore (#382) ───────────────────────────────────────────────────
+//
+// The extension also reports which session FILE the pane is on, so a restored
+// wmux can reopen it with `pi --session <path>`. Three rules, each from how pi
+// behaves rather than how it reads:
+//
+// - A session has a path before it has a file: pi writes the file with the
+//   first assistant message. So the path is reported only once the file exists
+//   and is non-empty — at session_start for a resumed or forked session, after
+//   a turn for a new one — never a path that may never exist.
+// - session_shutdown fires for /reload, /new, /resume and /fork too. Only
+//   `reason: "quit"` releases; on a switch the next session reports its own
+//   file. The release names the file it is leaving, so wmux drops it only if
+//   it is still the pane's current one.
+// - Every report and release carries a clock-derived `--seq`, so a message
+//   from a previous session (or a previous pi in the same pane) that lands
+//   late is dropped instead of overwriting a newer one.
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 /** Basenames that can execute a .js file we hand them. */
@@ -82,6 +100,46 @@ const SHUTDOWN_DEADLINE_MS = 2000;
  * most frequent, so they are worth naming to keep the common case free.
  */
 const READ_ONLY_TOOLS = new Set(["read", "ls", "grep", "find"]);
+
+/**
+ * The last `--seq` handed out by this process. Module-level, not per factory:
+ * pi rebinds the extension on /new, /resume, /fork and /reload, and the
+ * session reports of two instances must still be ordered. Derived from the
+ * clock so a NEW pi in the same pane starts above everything an older one sent
+ * — wmux keeps the newest seq per pane even after a quit forgot the pane.
+ * Microseconds since the epoch stay a safe integer until the year 2255.
+ */
+let lastSeq = 0;
+function nextSeq(now = Date.now()) {
+  lastSeq = Math.max(lastSeq + 1, now * 1000);
+  return lastSeq;
+}
+
+/** The file pi's session manager names, or null. Never throws into pi. */
+function namedSessionFile(ctx) {
+  try {
+    const file = ctx?.sessionManager?.getSessionFile?.();
+    return typeof file === "string" && file ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The session file pi is writing, or null while it does not exist yet — or is
+ * empty: `pi --session` on an empty file starts a new session in its place, so
+ * such a file is no handle at all.
+ */
+function sessionFileOnDisk(ctx, stat = statSync) {
+  const file = namedSessionFile(ctx);
+  if (!file) return null;
+  try {
+    const info = stat(file);
+    return info.isFile() && info.size > 0 ? file : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Find something that can run `$WMUX_CLI` (issue #187).
@@ -224,7 +282,7 @@ export default function wmuxExtension(pi) {
    * leaving the pane declared "working" with nothing alive to correct it.
    * Bounded, because a wedged wmux must not be able to hang pi's exit.
    */
-  function wmux(args, { wait = false } = {}) {
+  function wmux(args, { wait = false, onExit } = {}) {
     const cli = process.env.WMUX_CLI;
     const done = wait ? deferred() : null;
     try {
@@ -233,28 +291,33 @@ export default function wmuxExtension(pi) {
       // execFile cannot spawn without a shell — and a shell is exactly what
       // #154 keeps out of this path.
       if (!cli) {
-        if (process.platform === "win32") return settle(done);
-        return spawn("wmux", args, {}, done);
+        if (process.platform === "win32") {
+          onExit?.(new Error("WMUX_CLI is not set"));
+          return settle(done);
+        }
+        return spawn("wmux", args, {}, done, onExit);
       }
       const opts = { windowsHide: true };
       // wmux's own Electron binary is Node only with this set; without it the
       // same exe opens a second wmux window.
       if (runtime.electron) opts.env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
-      return spawn(runtime.file, [cli, ...args], opts, done);
-    } catch {
+      return spawn(runtime.file, [cli, ...args], opts, done, onExit);
+    } catch (err) {
+      onExit?.(err);
       return settle(done);
     }
   }
 
-  function spawn(file, argv, opts, done) {
+  function spawn(file, argv, opts, done, onExit) {
     let timer = null;
     if (done) {
       timer = setTimeout(() => settle(done), SHUTDOWN_DEADLINE_MS);
       // Never keep pi's event loop alive for a report nobody is waiting on.
       timer.unref?.();
     }
-    execFile(file, argv, opts, () => {
+    execFile(file, argv, opts, (error) => {
       if (timer) clearTimeout(timer);
+      onExit?.(error);
       settle(done);
     });
     return done ? done.promise : undefined;
@@ -278,6 +341,28 @@ export default function wmuxExtension(pi) {
   const report = (...args) => wmux(["report-agent", "--surface", surface, ...args]);
 
   let lastActivityPing = 0;
+
+  /** The file this instance last reported successfully; a repeat sends nothing. */
+  let reportedFile = null;
+  /** A report in flight, so a burst of turn ends is one spawn. */
+  let reportingFile = null;
+
+  /**
+   * Tell wmux which session file this pane is on, once it exists. A failed
+   * call is retried at the next opportunity rather than remembered as sent.
+   */
+  const reportSession = (ctx) => {
+    const file = sessionFileOnDisk(ctx);
+    if (!file || file === reportedFile || file === reportingFile) return;
+    reportingFile = file;
+    const args = ["report-session", file, "--provider", "pi", "--seq", String(nextSeq()), "--surface", surface];
+    wmux(args, {
+      onExit: (error) => {
+        if (reportingFile === file) reportingFile = null;
+        if (!error) reportedFile = file;
+      },
+    });
+  };
 
   /**
    * Unconditional, with no "am I currently blocked?" flag guarding it.
@@ -316,6 +401,7 @@ export default function wmuxExtension(pi) {
   pi.on("agent_settled", async (_event, ctx) => {
     report("--run-depth", "0");
     sendMetadata(ctx);
+    reportSession(ctx);
   });
 
   // ── Parked on a human ──────────────────────────────────────────────────────
@@ -348,8 +434,10 @@ export default function wmuxExtension(pi) {
     wmux(["hook", "--event", "PostToolUse", "--tool", tool]);
   });
 
+  // The first turn_end of a new session is the first moment its file exists.
   pi.on("turn_end", async (_event, ctx) => {
     sendMetadata(ctx);
+    reportSession(ctx);
   });
 
   pi.on("model_select", async (_event, ctx) => {
@@ -364,13 +452,26 @@ export default function wmuxExtension(pi) {
     clearBlocked();
     report("--run-depth", "0");
     sendMetadata(ctx);
+    // A resumed or forked session already has its file; a new one does not,
+    // and reports after its first turn instead.
+    reportSession(ctx);
   });
 
-  pi.on("session_shutdown", async () => {
-    // release-agent, not `--run-depth 0`: the pane stops having a declared
+  pi.on("session_shutdown", async (event, ctx) => {
+    const reason = typeof event?.reason === "string" ? event.reason : "quit";
+    // A switch (/new, /resume, /fork, /reload): the next instance's
+    // session_start re-declares the run state and reports its own file, so
+    // releasing here would only erase the handle a restore needs.
+    if (reason !== "quit") return;
+    // A pi release, not `--run-depth 0`: the pane stops having a declared
     // agent at all, so the sidebar falls back to the shell's own state rather
-    // than showing a pi that is gone as "idle" forever.
-    await wmux(["release-agent", "--surface", surface], { wait: true });
+    // than showing a pi that is gone as "idle" forever. wmux refuses it while
+    // wmux itself is quitting, so a pi killed by that keeps its handle.
+    const args = ["release-agent", "--surface", surface, "--provider", "pi", "--reason", reason];
+    const file = namedSessionFile(ctx);
+    if (file) args.push("--session", file);
+    args.push("--seq", String(nextSeq()));
+    await wmux(args, { wait: true });
   });
 }
 
@@ -389,6 +490,8 @@ wmuxExtension.__wmuxInternals = {
   promptReason,
   modelLabel,
   metadataArgs,
+  sessionFileOnDisk,
+  nextSeq,
   READ_ONLY_TOOLS,
   METADATA_TTL_MS,
 };
