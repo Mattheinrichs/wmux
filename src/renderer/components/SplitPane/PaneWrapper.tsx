@@ -542,6 +542,7 @@ export default function PaneWrapper({
     if (ws) {
       const newPaneId = `pane-${crypto.randomUUID()}` as PaneId;
       const newTree = splitNode(ws.splitTree, paneId, newPaneId, 'terminal', direction);
+      if (newTree === ws.splitTree) return; // pane not in the tree: no split, nothing to focus
       updateSplitTree(activeWorkspaceId, newTree);
       // Deferred, not called inline: the button's click goes on to bubble up to
       // the leaf's onClick in SplitContainer (the layout menu too — portals

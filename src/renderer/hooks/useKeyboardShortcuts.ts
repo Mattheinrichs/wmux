@@ -167,7 +167,12 @@ export function useKeyboardShortcuts(
       const ws = activeWs();
       if (!ws) return;
       const newPaneId = `pane-${uuid()}` as PaneId;
-      updateSplitTree(activeWorkspaceId, splitNode(ws.splitTree, focusedPaneId, newPaneId, type, dir));
+      const newTree = splitNode(ws.splitTree, focusedPaneId, newPaneId, type, dir);
+      // splitNode hands back the SAME tree when the target is not in it; focusing
+      // newPaneId then would point focus at a pane that does not exist, and the
+      // fallback effect in App only re-runs on a tree change, so nothing repairs it.
+      if (newTree === ws.splitTree) return;
+      updateSplitTree(activeWorkspaceId, newTree);
       // The pane the user just asked for is the one they mean to type into.
       onFocusPane?.(newPaneId);
     };
