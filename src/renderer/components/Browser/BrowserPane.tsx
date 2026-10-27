@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, type CSSProperties } from 'react';
 import AddressBar from './AddressBar';
 import { useT } from '../../i18n';
 import AgentBrowserSetup from './AgentBrowserSetup';
 import { popupBridgeSource } from './popup-bridge';
 import type { BrowserEngine } from '../../../shared/types';
 import { BROWSER_BLANK_PAGE } from '../../utils/browser-start-page';
+import { useKeepRendering } from '../../utils/browser-keep-rendering';
 import {
   activeHistoryUrl,
   encodeHistoryRestoreSrc,
@@ -35,6 +36,13 @@ interface BrowserPaneProps {
   initialHistory?: BrowserHistory;
   /** The stack changed — persist it beside the URL. Web mode only. */
   onHistoryChange?: (history: BrowserHistory) => void;
+  /**
+   * Is the pane on screen? False for a background tab and for every pane of an
+   * inactive workspace, which an ancestor hides with `visibility: hidden`. The
+   * pane cannot tell on its own in time to style the webview, so the parent
+   * that does the hiding says so.
+   */
+  visible?: boolean;
 }
 
 /**
@@ -211,6 +219,52 @@ export function elementHidden(el: HTMLElement | null | undefined): boolean {
   return el.offsetParent === null;
 }
 
+/**
+ * A hidden webview an agent is driving: painted, transparent, out of the way.
+ *
+ * `visibility: visible` overrides the hidden ancestor, so Chromium keeps the
+ * guest rendering (frames, requestAnimationFrame, unthrottled timers) and
+ * `capturePage` / `Page.captureScreenshot` get the frame they wait for.
+ * `opacity: 0` keeps it from showing over the pane the user is looking at,
+ * `pointer-events: none` lets the mouse through to that pane, and
+ * `tabIndex = -1` keeps Tab from walking into it: a visible webview is
+ * focusable again, and without it Tab from an input of the workspace on
+ * screen moved focus into the hidden page.
+ *
+ * Measured in a bare Electron 43 harness: the window still showed the active
+ * workspace, its hit test landed on the visible pane, Tab skipped the hidden
+ * webview, and CDP clicks, the accessibility snapshot and both captures still
+ * worked on the hidden page.
+ */
+export const KEEP_RENDERING_STYLE: CSSProperties = {
+  visibility: 'visible',
+  opacity: 0,
+  pointerEvents: 'none',
+};
+
+/**
+ * The webview's own style and tab index. Pure so every case is testable
+ * without a webview.
+ *
+ * Nothing to show (agent setup card, blank page) wins: hidden is exactly what
+ * those want, on screen or off. A hidden pane goes on painting only while an
+ * agent holds a lease on it (utils/browser-keep-rendering.ts); every other
+ * hidden pane inherits `visibility: hidden` and stays throttled like a
+ * background tab, as it always has. Agent mode is excluded: its webview shows
+ * agent-browser's dashboard, and its pages are painted by a real Chrome.
+ */
+export function webviewHiding(s: {
+  overlay: boolean;
+  isBlank: boolean;
+  isAgent: boolean;
+  visible: boolean;
+  keepRendering: boolean;
+}): { style?: CSSProperties; tabIndex?: number } {
+  if (s.overlay || s.isBlank) return { style: { visibility: 'hidden' } };
+  if (!s.visible && s.keepRendering && !s.isAgent) return { style: KEEP_RENDERING_STYLE, tabIndex: -1 };
+  return {};
+}
+
 export default function BrowserPane({
   // Blank, not the project's own GitHub repo (#232). A browser surface nobody
   // has given a URL has nowhere to be, and shipping the vendor's page as that
@@ -224,7 +278,9 @@ export default function BrowserPane({
   onEngineChange,
   initialHistory,
   onHistoryChange,
+  visible = true,
 }: BrowserPaneProps) {
+  const keepRendering = useKeepRendering(surfaceId);
   // src is fixed to the initial page; all later navigation goes through loadURL
   // (below). Binding src to a mutable url state AND calling loadURL made every
   // navigation trigger two loads of the same URL, which raced and produced a
@@ -694,8 +750,9 @@ export default function BrowserPane({
           className="browser-pane__webview"
           // Hidden rather than unmounted: unmounting destroys the guest page and
           // its CDP registration, so the setup card would cost the user the tab
-          // they were on. Same reason keep-alive tabs use visibility.
-          style={overlay || isBlank ? { visibility: 'hidden' } : undefined}
+          // they were on. Same reason keep-alive tabs use visibility. A pane an
+          // agent drives keeps painting while hidden: see webviewHiding.
+          {...webviewHiding({ overlay, isBlank, isAgent, visible, keepRendering })}
         />
         {isBlank && !overlay && (
           <div className="browser-pane__blank">

@@ -112,6 +112,8 @@ export function resolveRef(refMap: Map<string, RefEntry>, ref: string): RefEntry
 export const FRAME_KICK_DELAY_MS = 150;
 export const FRAME_KICK_INTERVAL_MS = 500;
 export const SCREENSHOT_DEADLINE_MS = 8000;
+/** When a stalled capture also tries `capturePage()` (see `withFrameKick`). */
+export const CAPTURE_FALLBACK_DELAY_MS = 1000;
 
 /**
  * Settle a `Page.captureScreenshot` on a page that is not painting (#262).
@@ -126,12 +128,26 @@ export const SCREENSHOT_DEADLINE_MS = 8000;
  * settled it every time in ~25 ms. Invalidating is a no-op for a page that is
  * already painting, so the nudge costs nothing in the common case — it only
  * runs once the capture has outlived FRAME_KICK_DELAY_MS anyway.
+ *
+ * `fallback` covers the one case no nudge reaches: a MINIMIZED window. The
+ * guest is hidden with it and CDP gets no frame however often it is
+ * invalidated, but `capturePage()` still reads a pane that was rendering when
+ * the window went down: on screen, or kept painting by an agent's lease
+ * (browser-keep-rendering.ts). Measured: CDP timed out, capturePage answered in
+ * ~15 ms with the page's pixels. Un-hiding the webview while the window is
+ * minimized did not wake it (measured), so a pane that was hidden at that
+ * moment still ends on the deadline's message. The fallback starts once the
+ * capture has stalled for CAPTURE_FALLBACK_DELAY_MS, so a pane that paints
+ * never runs it; an answer of null (an empty image) or an error leaves the race
+ * to the other two.
  */
 export async function withFrameKick<T>(
   wc: Pick<Electron.WebContents, 'invalidate' | 'isDestroyed'>,
   capture: Promise<T>,
+  fallback?: () => Promise<T | null>,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
   const started = Date.now();
   const stalled = new Promise<never>((_, reject) => {
     const kick = (): void => {
@@ -147,10 +163,19 @@ export async function withFrameKick<T>(
     };
     timer = setTimeout(kick, FRAME_KICK_DELAY_MS);
   });
+  const contenders: Promise<T>[] = [capture, stalled];
+  if (fallback) {
+    contenders.push(new Promise<T>((resolve) => {
+      fallbackTimer = setTimeout(() => {
+        fallback().then((value) => { if (value !== null) resolve(value); }, () => {});
+      }, CAPTURE_FALLBACK_DELAY_MS);
+    }));
+  }
   try {
-    return await Promise.race([capture, stalled]);
+    return await Promise.race(contenders);
   } finally {
     if (timer) clearTimeout(timer);
+    if (fallbackTimer) clearTimeout(fallbackTimer);
   }
 }
 
@@ -221,6 +246,11 @@ export class CDPBridge {
 
   hasTarget(wcId: number): boolean {
     return this.targets.has(wcId);
+  }
+
+  /** The browser surface a webContents was attached for, or null if unknown. */
+  surfaceIdFor(wcId: number): string | null {
+    return this.targets.get(wcId)?.surfaceId ?? null;
   }
 
   /**
@@ -482,7 +512,16 @@ export class CDPBridge {
     }
     const wc = this.liveWebContents(target);
     const capture = this.sendCommand(target, 'Page.captureScreenshot', params);
-    const { data } = await (wc ? withFrameKick(wc, capture) : capture);
+    // Viewport only: capturePage() cannot reach below the fold, so a full-page
+    // capture in a minimized window still ends on the deadline's message.
+    // `stayHidden` keeps the capture from flipping the page's visibilityState.
+    const fallback = wc && !fullPage
+      ? async () => {
+        const image = await wc.capturePage(undefined, { stayHidden: true });
+        return image.isEmpty() ? null : { data: image.toPNG().toString('base64') };
+      }
+      : undefined;
+    const { data } = await (wc ? withFrameKick(wc, capture, fallback) : capture);
     return data;
   }
 

@@ -116,9 +116,20 @@ export class CDPProxy {
   private port: number | null = null;
   private webContentsId: number | null = null;
   private activeWs: WebSocket | null = null;
+  private beforeCommand: ((wcId: number) => Promise<void>) | null = null;
 
   setWebContentsId(wcId: number | null): void {
     this.webContentsId = wcId;
+  }
+
+  /**
+   * Runs before every command a client forwards to the page. A client attached
+   * here is an agent driving the pane as surely as `wmux browser` is, so this
+   * is where its lease to keep painting while hidden gets renewed
+   * (browser-keep-rendering.ts).
+   */
+  onBeforeCommand(fn: ((wcId: number) => Promise<void>) | null): void {
+    this.beforeCommand = fn;
   }
 
   get currentWebContentsId(): number | null {
@@ -273,6 +284,7 @@ export class CDPProxy {
       };
       const send = async (msg: any, method: string, params: Record<string, unknown>): Promise<void> => {
         try {
+          if (this.beforeCommand) await this.beforeCommand(wc.id).catch(() => {});
           reply(msg, { result: await wc.debugger.sendCommand(method, params) });
         } catch (err: any) {
           reply(msg, { error: { code: -32000, message: err.message } });

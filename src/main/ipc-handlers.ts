@@ -31,6 +31,7 @@ import { WindowManager, supportsBackdropMaterial, supportsTransparency, toWindow
 import { refreshShellIconCache, takeIconChangeNotice } from './icon-cache';
 import { CDPBridge } from './cdp-bridge';
 import { CDPProxy } from './cdp-proxy';
+import { keepRenderingLeases } from './browser-keep-rendering';
 import { AgentManager } from './agent-manager';
 import { saveNamedSession, loadNamedSession, listNamedSessions, deleteNamedSession, loadSession } from './session-persistence';
 import { listDir, resolveInRoot, isExecutablePath } from './explorer-fs';
@@ -967,6 +968,9 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
       cdpProxyInstance?.setWebContentsId(null);
     }
   });
+  // A CDP client driving a hidden pane keeps it painting, as `wmux browser`
+  // does (browser-keep-rendering.ts).
+  cdpProxyInstance?.onBeforeCommand((wcId) => keepRenderingLeases.touch(wcId, cdpBridge.surfaceIdFor(wcId)));
 
   /**
    * Cheap enough to call on every entry into agent mode and from the setup

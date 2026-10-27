@@ -1950,18 +1950,23 @@ export default function App() {
                 onMouseLeave={(e) => { (e.target as HTMLElement).style.color = '#999'; (e.target as HTMLElement).style.background = 'rgba(0,0,0,0.5)'; }}
                 title={t('app.closeBrowserPanel', 'Close browser panel')}
               >×</button>
-              {/* Per-workspace browser — all stay mounted, only active visible */}
+              {/* Per-workspace browser — all stay mounted, only active visible.
+                  Hidden with `visibility`, not `display: none`, like a
+                  workspace's own panes: a webview under `display: none` cannot
+                  be kept painting, so an agent driving another workspace's
+                  panel could not take a screenshot. */}
               {workspaces.map((ws) => (
                 <div
                   key={`browser-${ws.id}`}
                   style={{
                     position: 'absolute',
                     inset: 0,
-                    display: ws.id === activeWorkspaceId ? 'block' : 'none',
+                    visibility: ws.id === activeWorkspaceId ? 'visible' : 'hidden',
                   }}
                 >
                   <BrowserPane
                     surfaceId={`browser-${ws.id}`}
+                    visible={ws.id === activeWorkspaceId}
                     // `|| undefined`, not `??` (issue #212). A workspace that has
                     // never opened its browser is saved with `browserUrl: ''`,
                     // and `''` is a value — it satisfies `??` and defeats
