@@ -546,6 +546,8 @@ export const zhTW: Translation = {
   'settings.workspacePanel.restoreAgySessionsHint': '以 `agy --conversation` 在每個還原分頁原本的目錄中重新開啟它的 agy 對話。需要 wmux 的 agy 外掛（已啟用狀態掛鉤）與 Node.js。對話會在開始時記錄，或在繼續後的第一則訊息時記錄。結束 agy 回到 shell 提示字元後，不會重新開啟。',
   'settings.workspacePanel.restoreOmpSessions': '還原時繼續 omp 工作階段',
   'settings.workspacePanel.restoreOmpSessionsHint': '以 `omp --resume <path>` 在每個還原分頁原本的目錄中重新開啟它的精確 omp 工作階段。需要啟用 wmux 的 omp 擴充功能（狀態掛鉤已開啟）。正常結束的 omp 不會重新開啟。若工作階段檔案已被刪除，該窗格會安全略過，絕不偷偷建立新工作階段。',
+  'settings.workspacePanel.restorePiSessions': '還原時繼續 pi 工作階段',
+  'settings.workspacePanel.restorePiSessionsHint': "以 `pi --session <path>` 在每個還原分頁原本的目錄中重新開啟它的精確 pi 工作階段。需要啟用 wmux 的 pi 擴充功能（狀態掛鉤已開啟）。pi 寫入工作階段檔案後（第一次回覆之後）才會記錄。結束的 pi 不會重新開啟；以 /new、/resume 或 /fork 切換工作階段會記錄新的工作階段。工作階段檔案已遺失或為空的分頁會被略過，不會建立新的工作階段。",
   'settings.workspacePanel.restoreCodexSessionsHint': '在每個還原的分頁中重新開啟原本那段 Codex 對話。先啟用這個選項，再到新的 wmux 終端機啟動 codex。需要 Node.js，以及在 PowerShell 或命令提示字元中執行的原生 Windows 版 Codex CLI。正常結束的工作階段不會重新開啟。',
   'settings.workspacePanel.restoreClaudeSessions': '還原時繼續 Claude Code 工作階段',
   'settings.workspacePanel.restoreClaudeSessionsHint': 'wmux 還原工作階段時，會在原本的目錄下用 `claude --resume` 重新啟動每個曾執行 Claude Code 的終端機。預設關閉：這些窗格會同時各啟動一個 agent。Claude 已沒有對應對話的窗格會被略過，你正常結束的 Claude 也不會被還原。',

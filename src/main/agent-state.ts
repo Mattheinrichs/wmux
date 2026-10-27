@@ -35,6 +35,7 @@ import { isValidOpencodeSessionId } from './opencode-resume';
 import { isValidAgyConversationId } from './agy-resume';
 import { isValidQwenSessionId } from './qwen-resume';
 import { isValidOmpSessionId } from './omp-resume';
+import { isValidPiSessionFile } from './pi-resume';
 import { resolveWireChoiceId } from '../shared/remote-console-protocol';
 
 export type AgentRunState = 'blocked' | 'working' | 'idle' | 'unknown';
@@ -462,7 +463,7 @@ export function reportAgent(surfaceId: SurfaceId, params: ReportAgentParams): Ag
 }
 
 /** Who a session handle belongs to — it decides the validator and the restore command. */
-export type AgentSessionProvider = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen' | 'omp';
+export type AgentSessionProvider = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen' | 'omp' | 'pi';
 const SESSION_VALIDATORS: Record<AgentSessionProvider, (id: unknown) => id is string> = {
   claude: isValidClaudeSessionId,
   codex: isValidCodexSessionId,
@@ -470,9 +471,11 @@ const SESSION_VALIDATORS: Record<AgentSessionProvider, (id: unknown) => id is st
   agy: isValidAgyConversationId,
   qwen: isValidQwenSessionId,
   omp: isValidOmpSessionId,
+  // A path, checked against pi's sessions dir — the dir default is read per call.
+  pi: (id: unknown): id is string => isValidPiSessionFile(id),
 };
 function isSessionProvider(value: unknown): value is AgentSessionProvider {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'agy' || value === 'qwen' || value === 'omp';
+  return typeof value === 'string' && Object.hasOwn(SESSION_VALIDATORS, value);
 }
 
 /** `pane.report_agent_session` — tie the pane to a resumable session handle. */
@@ -829,6 +832,21 @@ export function releaseAgyAtPrompt(surfaceId: SurfaceId, ranAgy: boolean): boole
     orphanedSessions.delete(surfaceId);
   }
   if (!record?.sessionId) notifySessionChanged();
+  return true;
+}
+
+/**
+ * A pi quit (#382) on a pane wmux holds no record for: the handle that matters
+ * is the one restored into the tab from session.json, which the extension
+ * names but which was never re-reported (pi reports a file only once it is on
+ * disk). Marking the surface released makes the next save drop it, exactly as
+ * `forget()` would have; the caller has already refused this while wmux quits.
+ */
+export function releasePiWithoutRecord(surfaceId: SurfaceId): boolean {
+  if (records.has(surfaceId)) return false;
+  releasedSessions.add(surfaceId);
+  orphanedSessions.delete(surfaceId);
+  notifySessionChanged();
   return true;
 }
 

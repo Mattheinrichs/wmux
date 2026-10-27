@@ -148,6 +148,7 @@ function applyMintedIds(template: SplitNode, idMap: Map<SurfaceId, SurfaceId>): 
         delete next.agySessionId;
         delete next.qwenSessionId;
         delete next.ompSessionId;
+        delete next.piSessionFile;
         if (next.codeRootSurfaceId) {
           const root = idMap.get(next.codeRootSurfaceId);
           // An unresolvable root means the captured tree never contained the

@@ -142,6 +142,12 @@ export interface SurfaceRef {
    * `workspacePrefs.restoreOmpSessions` is on.
    */
   ompSessionId?: string;
+  /**
+   * pi session FILE to resume (#382), stamped by `stampPiSessionFiles` from
+   * what wmux's pi extension reported. Restored as `pi --session <path>` when
+   * `workspacePrefs.restorePiSessions` is on.
+   */
+  piSessionFile?: string;
   /** Initial URL for a browser surface created from a quick-launch profile (issue #32). */
   url?: string;
   /** A browser surface's back/forward stack, restored on mount (#315). See shared/browser-history.ts. */

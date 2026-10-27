@@ -15,7 +15,7 @@
 //
 // Pure: no Electron, no Node, exercised straight from vitest.
 
-export type ResumableAgent = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen' | 'omp';
+export type ResumableAgent = 'claude' | 'codex' | 'opencode' | 'agy' | 'qwen' | 'omp' | 'pi';
 
 /** Which quoting rules a pane's shell applies to the resume it is typed. */
 export type ShellFamily = 'powershell' | 'posix' | 'cmd';
@@ -32,7 +32,7 @@ export function detectShellFamily(shell?: string, samplePath?: string): ShellFam
 }
 
 /**
- * Shell-aware quoting for omp session paths:
+ * Shell-aware quoting for session-file handles (omp, pi):
  * - PowerShell: single quotes with '' escaping (verbatim: no $ or ` expansion)
  * - POSIX (bash/zsh/sh/wsl): single quotes with '\'' escaping
  * - cmd.exe: double quotes (cmd expands %VAR%, does not support single quotes)
@@ -73,6 +73,8 @@ const RESUMABLE = {
   // Never called for omp: its handle is a path, which mergeResume quotes for
   // the pane's own shell (mergeOmpResume).
   omp: { executable: /^omp\d*$/, args: (id: string) => `--resume ${id}` },
+  // Same for pi (#382): `pi --session <path>`, quoted by mergePiResume.
+  pi: { executable: /^pi\d*$/, args: (id: string) => `--session ${id}` },
 } satisfies Record<ResumableAgent, { executable: RegExp; args: (id: string) => string }>;
 /** The command typed when nothing in the pane launches an agent. */
 const LAUNCH_COMMAND: Record<ResumableAgent, string> = {
@@ -82,7 +84,13 @@ const LAUNCH_COMMAND: Record<ResumableAgent, string> = {
   agy: 'agy --conversation',
   qwen: 'qwen --resume',
   omp: 'omp --resume',
+  pi: 'pi --session',
 };
+
+/** Agents whose handle is a file path, quoted for the pane's own shell. */
+function takesPath(agent: ResumableAgent): boolean {
+  return agent === 'omp' || agent === 'pi';
+}
 
 /** Wrappers a launcher can hide behind: `npx -y opencode`, `pnpm dlx codex`. */
 const RUNNERS = new Set(['npx', 'bunx', 'pnpm', 'yarn', 'npm', 'bun', 'deno']);
@@ -271,6 +279,17 @@ function absorbSeparators(command: string, ranges: Range[]): Range[] {
   return normalized;
 }
 
+/** `command` with `ranges` cut out, each over the separator beside it. */
+function withoutRanges(command: string, ranges: Range[]): string {
+  let result = '';
+  let lastIdx = 0;
+  for (const range of absorbSeparators(command, ranges)) {
+    result += command.slice(lastIdx, range.start);
+    lastIdx = range.end;
+  }
+  return (result + command.slice(lastIdx)).trim();
+}
+
 /**
  * An omp launcher with its own session flags replaced by `--resume <path>`, or
  * null when it must not be resumed (`--restore`, `--no-session`, or a path the
@@ -282,14 +301,47 @@ function mergeOmpResume(command: string, id: string, shell?: string): string | n
   if (spans.some(span => forbidsOmpResume(span.raw))) return null;
   const quoted = quoteOmpArg(id, shell);
   if (!quoted) return null;
-  let result = '';
-  let lastIdx = 0;
-  for (const range of absorbSeparators(command, ompSessionFlagRanges(spans))) {
-    result += command.slice(lastIdx, range.start);
-    lastIdx = range.end;
+  return `${withoutRanges(command, ompSessionFlagRanges(spans))} --resume ${quoted}`;
+}
+
+/**
+ * Flags that make a pi launch something other than "this exact session"
+ * (#382): no session at all, a fork of another one, or a session picked by id.
+ * The pane asked for that on purpose, so the resume is not merged in.
+ */
+function forbidsPiResume(raw: string): boolean {
+  return ['--no-session', '--fork', '--session-id'].some(flag => raw === flag || raw.startsWith(`${flag}=`));
+}
+
+/**
+ * pi's other session selectors, removed so `--session <path>` is the only one.
+ * Unlike omp's, pi's `--continue`/`-c` and `--resume`/`-r` take NO value
+ * (`-r` opens a picker) — so the token after them is somebody else's argument
+ * and stays. `--session` takes the next token, when that is not a flag.
+ */
+function piSessionFlagRanges(spans: CommandSpan[]): Range[] {
+  const ranges: Range[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const { raw, start, end } = spans[i];
+    if (['--continue', '-c', '--resume', '-r'].includes(raw) || raw.startsWith('--session=')) {
+      ranges.push({ start, end });
+    } else if (raw === '--session') {
+      const next = spans[i + 1];
+      const takesValue = next !== undefined && !next.raw.startsWith('-');
+      ranges.push({ start, end: takesValue ? next.end : end });
+      if (takesValue) i++;
+    }
   }
-  result += command.slice(lastIdx);
-  return `${result.trim()} --resume ${quoted}`;
+  return ranges;
+}
+
+/** A pi launcher with its session selectors replaced by `--session <path>`, or null. */
+function mergePiResume(command: string, id: string, shell?: string): string | null {
+  const spans = scanCommandSpans(command);
+  if (spans.some(span => forbidsPiResume(span.raw))) return null;
+  const quoted = quoteOmpArg(id, shell);
+  if (!quoted) return null;
+  return `${withoutRanges(command, piSessionFlagRanges(spans))} --session ${quoted}`;
 }
 
 /**
@@ -309,14 +361,16 @@ export function mergeResume(
   const commands = base ?? [];
   const launcher = lastAgentLauncher(commands);
   if (!launcher) {
-    const arg = agent === 'omp' ? quoteOmpArg(id, shell) : id;
+    const arg = takesPath(agent) ? quoteOmpArg(id, shell) : id;
     if (!arg) return null;
     return [...commands, `${LAUNCH_COMMAND[agent]} ${arg}`];
   }
   if (launcher.agent !== agent) return null;
   const next = [...commands];
-  if (agent === 'omp') {
-    const cleaned = mergeOmpResume(next[launcher.index], id, shell);
+  if (takesPath(agent)) {
+    const cleaned = agent === 'pi'
+      ? mergePiResume(next[launcher.index], id, shell)
+      : mergeOmpResume(next[launcher.index], id, shell);
     if (!cleaned) return null;
     next[launcher.index] = cleaned;
     return next;

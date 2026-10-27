@@ -66,6 +66,7 @@ import {
 } from './claude-resume';
 import { pruneDeadQwenSessions, listKnownQwenSessionIds } from './qwen-resume';
 import { pruneDeadOmpSessions } from './omp-resume';
+import { pruneDeadPiSessions } from './pi-resume';
 import { sessionWindows, MAX_RESTORED_WINDOWS } from './session-windows';
 import { WindowManager, appIconCandidates } from './window-manager';
 import { initAutoUpdater, requestUpdateNow, getUpdateState } from './updater';
@@ -345,7 +346,8 @@ function routeSpecialV2(
   // release is `pane.release_agent`, sent by its SessionEnd hook as the PTY
   // dies, and gets the same refusal.
   if ((request.method === 'pane.release_codex_session' || request.method === 'pane.release_opencode_session' ||
-       request.method === 'pane.release_omp_session' || request.method === 'pane.release_agent') && isQuitting) {
+       request.method === 'pane.release_omp_session' || request.method === 'pane.release_pi_session' ||
+       request.method === 'pane.release_agent') && isQuitting) {
     respond({ released: false });
     return true;
   }
@@ -1379,6 +1381,23 @@ function pruneRestoredOmpSessions(windows: SavedWindow[]): void {
   }
 }
 
+/**
+ * The same for pi (#382), stricter: `pi --session` on a missing OR empty file
+ * silently opens a new empty session in its place, so both are dropped.
+ */
+function pruneRestoredPiSessions(windows: SavedWindow[]): void {
+  let dropped = 0;
+  for (const state of windows) {
+    for (const ws of state.workspaces ?? []) {
+      const result = pruneDeadPiSessions(ws.splitTree);
+      ws.splitTree = result.tree;
+      dropped += result.dropped;
+    }
+  }
+  if (dropped > 0) {
+    console.log(`[pi-resume] dropped ${dropped} session file(s) that are gone, empty or invalid`);
+  }
+}
 
 /** The same pruning for Qwen Code: a `qwen --resume` of a deleted session exits 1. */
 function pruneRestoredQwenSessions(windows: SavedWindow[]): void {
@@ -1616,6 +1635,7 @@ app.whenReady().then(() => {
   pruneRestoredClaudeSessions(savedWindows);
   pruneRestoredQwenSessions(savedWindows);
   pruneRestoredOmpSessions(savedWindows);
+  pruneRestoredPiSessions(savedWindows);
   verifyRestoredWorktrees(savedWindows, { showNotice: deliverPaneNotice });
   if (savedWindows.length === 0) {
     sessionWindows.markStartup(windowManager.createWindow());

@@ -354,6 +354,19 @@ export default function WorkspaceSettings() {
       </p>
 
       <div className="settings-row">
+        <label className="settings-label">{t('settings.workspacePanel.restorePiSessions', 'Resume pi sessions on restore')}</label>
+        <input
+          type="checkbox"
+          className="settings-toggle"
+          checked={workspacePrefs.restorePiSessions}
+          onChange={(e) => setWorkspacePrefs({ restorePiSessions: e.target.checked })}
+        />
+      </div>
+      <p className="settings-hint">
+        {t('settings.workspacePanel.restorePiSessionsHint', "Reopens each restored tab's exact pi session with `pi --session <path>`, in the directory it was in. Needs the wmux pi extension (Status hooks on). A session is recorded once pi has written it (after its first reply). A pi you quit is not reopened; switching sessions with /new, /resume or /fork records the new one. Tabs whose session file is gone or empty are skipped rather than opened as a new session.")}
+      </p>
+
+      <div className="settings-row">
         <label className="settings-label">{t('settings.workspacePanel.detectAgentScreens', 'Read agent screens to infer state')}</label>
         <input
           type="checkbox"

@@ -31,6 +31,8 @@ export interface TerminalPaneProps {
   qwenSessionId?: string;
   /** Omp session to resume on a restored pane. */
   ompSessionId?: string;
+  /** pi session file to resume on a restored pane (#382). */
+  piSessionFile?: string;
   focused?: boolean;
   visible?: boolean;
   showFindBar?: boolean;
@@ -56,6 +58,7 @@ export default function TerminalPane({
   agySessionId,
   qwenSessionId,
   ompSessionId,
+  piSessionFile,
   focused = true,
   visible = true,
   showFindBar = false,
@@ -63,7 +66,7 @@ export default function TerminalPane({
   copyModeActive = false,
   attachGeneration,
 }: TerminalPaneProps) {
-  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, attachGeneration, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId });
+  const { terminalRef, searchAddonRef, xtermRef } = useTerminal({ surfaceId, shell, cwd, visible, focused, attachGeneration, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId, piSessionFile });
 
   const [_lastQuery, setLastQuery] = useState('');
 

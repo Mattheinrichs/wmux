@@ -21,6 +21,21 @@ function isValidOmpHandle(id: unknown): id is string {
 }
 
 /**
+ * Mirrors the SHAPE half of isValidPiSessionFile in src/main/pi-resume.ts
+ * (#382): an absolute drive-letter `.jsonl` path with no traversal segment and
+ * nothing the restore command cannot carry. Containment in pi's sessions dir
+ * is checked by main, which knows where that is, when the restored tree is
+ * pruned at startup.
+ */
+function isValidPiHandle(id: unknown): id is string {
+  if (typeof id !== 'string' || id.length === 0 || id.length > 4096) return false;
+  // eslint-disable-next-line no-control-regex -- matching control characters is the point
+  if (/[\u0000-\u001f\u007f"]/.test(id)) return false;
+  if (!/^[a-zA-Z]:[\\/]/.test(id) || !id.toLowerCase().endsWith('.jsonl')) return false;
+  return !/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(id);
+}
+
+/**
  * Surfaces that have already spent their stored resume in this run.
  *
  * Module-level, not a hook ref: the guard has to outlive the component. A pane
@@ -100,10 +115,13 @@ export function withClaudeResume(opts: {
   qwenEnabled?: boolean;
   ompSessionId?: string;
   ompEnabled?: boolean;
+  piSessionFile?: string;
+  piEnabled?: boolean;
   shell?: string;
 }): string[] | undefined {
   const { base, surfaceId, claudeSessionId, enabled } = opts;
   if (!surfaceId) return base;
+  if (opts.piSessionFile) return withPiResume(base, surfaceId, opts);
   if (opts.qwenSessionId) return withQwenResume(base, surfaceId, opts);
   if (opts.agySessionId) {
     // One provider per tab, as for Codex and OpenCode.
@@ -139,6 +157,25 @@ export function withClaudeResume(opts: {
   // user can edit, and it is about to become a command line.
   if (!SESSION_ID_RE.test(claudeSessionId)) return base;
   return applyResume(base, surfaceId, 'claude', claudeSessionId);
+}
+
+/**
+ * The pi branch of {@link withClaudeResume} (#382). One provider per tab, like
+ * the others; the file is re-checked because session.json is editable, and
+ * quoted for the pane's own shell when the command is built.
+ */
+function withPiResume(
+  base: string[] | undefined,
+  surfaceId: string,
+  opts: {
+    piSessionFile?: string; piEnabled?: boolean; shell?: string; claudeSessionId?: string; codexSessionId?: string;
+    opencodeSessionId?: string; agySessionId?: string; qwenSessionId?: string; ompSessionId?: string;
+  },
+): string[] | undefined {
+  const file = opts.piSessionFile;
+  if (!opts.piEnabled || !isValidPiHandle(file)) return base;
+  if (opts.claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId || opts.qwenSessionId || opts.ompSessionId) return base;
+  return applyResume(base, surfaceId, 'pi', file, opts.shell);
 }
 
 /**

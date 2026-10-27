@@ -588,6 +588,11 @@ export interface WorkspacePrefs {
    */
   restoreOmpSessions: boolean;
   /**
+   * Opt-in: reopen each tab's pi session file with `pi --session <path>`
+   * (#382). Off by default, like the others.
+   */
+  restorePiSessions: boolean;
+  /**
    * How many terminal panes a new workspace opens with, and how they sit
    * (issue #212).
    *
@@ -643,6 +648,7 @@ export const DEFAULT_WORKSPACE_PREFS: WorkspacePrefs = {
   restoreAgySessions: false,
   restoreQwenSessions: false,
   restoreOmpSessions: false,
+  restorePiSessions: false,
   detectAgentScreens: true,
   newWorkspacePanes: 3,
   newWorkspaceLayout: 'grid',

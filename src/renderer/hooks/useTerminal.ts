@@ -114,6 +114,8 @@ interface UseTerminalOptions {
   qwenSessionId?: string;
   /** Omp session to resume on a restored pane. */
   ompSessionId?: string;
+  /** pi session file to resume on a restored pane (#382). */
+  piSessionFile?: string;
 }
 
 interface UseTerminalResult {
@@ -814,7 +816,7 @@ export async function fetchTheme(name: string): Promise<ThemeConfig> {
   }
 }
 
-export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = true, attachGeneration, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId }: UseTerminalOptions = {}): UseTerminalResult {
+export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = true, attachGeneration, colorScheme, startupCommands, env, claudeSessionId, codexSessionId, opencodeSessionId, agySessionId, qwenSessionId, ompSessionId, piSessionFile }: UseTerminalOptions = {}): UseTerminalResult {
   const t = useT();
   const terminalRef = useRef<HTMLDivElement | null>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -859,6 +861,8 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
   qwenSessionIdRef.current = qwenSessionId;
   const ompSessionIdRef = useRef<string | undefined>(ompSessionId);
   ompSessionIdRef.current = ompSessionId;
+  const piSessionFileRef = useRef<string | undefined>(piSessionFile);
+  piSessionFileRef.current = piSessionFile;
   // Read by the bell handler (#335), whose closure outlives every render.
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -1822,6 +1826,8 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
             qwenEnabled: useStore.getState().workspacePrefs.restoreQwenSessions,
             ompSessionId: ompSessionIdRef.current,
             ompEnabled: useStore.getState().workspacePrefs.restoreOmpSessions,
+            piSessionFile: piSessionFileRef.current,
+            piEnabled: useStore.getState().workspacePrefs.restorePiSessions,
             shell: effectiveShell,
           });
           window.wmux.pty.create({ shell: effectiveShell, cwd: effectiveCwd, env: envRef.current ?? {}, surfaceId, startupCommands: spawnCommands, cols: initialCols, rows: initialRows })
