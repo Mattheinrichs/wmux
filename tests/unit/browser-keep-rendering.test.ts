@@ -20,6 +20,7 @@ import {
   keepRenderingLeases,
   KEEP_RENDERING_MS,
   KEEP_RENDERING_RENEW_MS,
+  KEEP_RENDERING_GRANT_TIMEOUT_MS,
 } from '../../src/main/browser-keep-rendering';
 import {
   grantKeepRendering,
@@ -89,6 +90,29 @@ describe('KeepRenderingLeases (main)', () => {
     await expect(l.touch(7, 'surf-a')).resolves.toBeUndefined();
     await l.touch(7, 'surf-a');
     expect(grant).toHaveBeenCalledTimes(2);
+  });
+
+  it('a hung renderer cannot hang the verb: the grant gives up after the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      // executeJavaScript on a hung renderer never settles (#289).
+      const grant = vi.fn(() => new Promise<boolean>(() => {}));
+      const l = new KeepRenderingLeases(grant, () => 1_000_000);
+      let settled = false;
+      const touched = l.touch(7, 'surf-a').then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(KEEP_RENDERING_GRANT_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await touched;
+      expect(settled).toBe(true);
+      // Not granted, so the next verb asks again rather than trusting a lease.
+      const again = l.touch(7, 'surf-a');
+      expect(grant).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(KEEP_RENDERING_GRANT_TIMEOUT_MS);
+      await again;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

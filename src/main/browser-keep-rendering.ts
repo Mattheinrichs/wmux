@@ -48,6 +48,15 @@ export const KEEP_RENDERING_MS = 5 * 60_000;
  */
 export const KEEP_RENDERING_RENEW_MS = 30_000;
 
+/**
+ * How long a verb waits for the renderers to take a lease. Every web verb and
+ * every proxied CDP command awaits the grant before it runs, and
+ * `executeJavaScript` on a HUNG renderer never settles (#289), so an unbounded
+ * wait would hang `wmux browser` and chrome-devtools-mcp along with it, where
+ * before leases they kept working. A healthy renderer answers in a few ms.
+ */
+export const KEEP_RENDERING_GRANT_TIMEOUT_MS = 250;
+
 /** Tells the renderers; true when one of them took the lease. */
 export type KeepRenderingGrant = (surfaceId: string, ms: number) => Promise<boolean>;
 
@@ -74,10 +83,16 @@ export class KeepRenderingLeases {
     // Recorded before the await so a concurrent verb does not grant twice.
     this.renewedAt.set(wcId, t);
     let granted = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      granted = await this.grant(surfaceId, KEEP_RENDERING_MS);
+      const timedOut = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), KEEP_RENDERING_GRANT_TIMEOUT_MS);
+      });
+      granted = await Promise.race([this.grant(surfaceId, KEEP_RENDERING_MS), timedOut]);
     } catch {
       // Treated as not granted, below.
+    } finally {
+      clearTimeout(timer);
     }
     // A renderer that was reloading, or one that predates the hook, gets asked
     // again on the next verb rather than after the renewal interval.
