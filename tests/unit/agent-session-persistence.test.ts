@@ -41,9 +41,10 @@ describe('Claude handle across an autosave', () => {
     expect('claudeSessionId' in stampAgentSessionIds(saved).surfaces[0]).toBe(false);
   });
 
-  it('forgets it when the PTY exited under it', () => {
+  it('forgets a conversation the user exited before the shell died', () => {
     reportAgentSession(SA, { sessionId: A });
     const saved = stampAgentSessionIds(leaf([terminal(SA)]));
+    releaseAgent(SA);
     clearAgentState(SA);
     expect('claudeSessionId' in stampAgentSessionIds(saved).surfaces[0]).toBe(false);
   });
@@ -53,5 +54,55 @@ describe('Claude handle across an autosave', () => {
     const out = stampAgentSessionIds(leaf([terminal(SA, { claudeSessionId: A })]));
     expect(out.surfaces[0].claudeSessionId).toBeUndefined();
     expect(out.surfaces[0].codexSessionId).toBe(B);
+  });
+});
+
+describe('a pane whose process was killed under its agent', () => {
+  // A Microsoft Store update of PowerShell terminates every packaged pwsh.exe
+  // at once. Each PTY exit used to release its pane's handle, so the next
+  // autosave wrote every Claude and Codex tab as a plain shell, and the restore
+  // after the reboot brought exactly that back.
+  it('keeps the Claude id through the PTY exit', () => {
+    reportAgentSession(SA, { sessionId: A });
+    const saved = stampAgentSessionIds(leaf([terminal(SA)]));
+    clearAgentState(SA);
+    expect(stampAgentSessionIds(saved).surfaces[0].claudeSessionId).toBe(A);
+  });
+
+  it('keeps it on a tree that never carried it', () => {
+    // The live tree holds no stamped id (only the persisted copy does), so the
+    // handle has to come from agent-state, not from the tree being saved.
+    reportAgentSession(SA, { sessionId: A });
+    clearAgentState(SA);
+    expect(stampAgentSessionIds(leaf([terminal(SA)])).surfaces[0].claudeSessionId).toBe(A);
+  });
+
+  it('keeps a Codex handle under its own provider', () => {
+    reportAgentSession(SA, { sessionId: B, provider: 'codex' });
+    clearAgentState(SA);
+    const out = stampAgentSessionIds(leaf([terminal(SA, { claudeSessionId: A })]));
+    expect(out.surfaces[0].codexSessionId).toBe(B);
+    expect(out.surfaces[0].claudeSessionId).toBeUndefined();
+  });
+
+  it('keeps a restored id whose agent had reported a state but no session', () => {
+    reportAgent(SA, { runDelta: 1 });
+    clearAgentState(SA);
+    expect(stampAgentSessionIds(leaf([terminal(SA, { claudeSessionId: A })])).surfaces[0].claudeSessionId).toBe(A);
+  });
+
+  it('takes a new report in the respawned shell over the kept handle', () => {
+    reportAgentSession(SA, { sessionId: A });
+    clearAgentState(SA);
+    reportAgentSession(SA, { sessionId: B });
+    expect(stampAgentSessionIds(leaf([terminal(SA)])).surfaces[0].claudeSessionId).toBe(B);
+  });
+
+  it('forgets the kept handle once a later agent in that tab is released', () => {
+    reportAgentSession(SA, { sessionId: A });
+    clearAgentState(SA);
+    reportAgent(SA, { runDelta: 1 });
+    releaseAgent(SA);
+    expect('claudeSessionId' in stampAgentSessionIds(leaf([terminal(SA, { claudeSessionId: A })])).surfaces[0]).toBe(false);
   });
 });

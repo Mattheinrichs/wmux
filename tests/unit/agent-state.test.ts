@@ -16,6 +16,9 @@ import {
   listAgentStates,
   listBlocked,
   clearAgentState,
+  orphanedSession,
+  wasAgentReleased,
+  onAgentSessionChanged,
   resetAgentState,
   resolveState,
   liveMetadata,
@@ -170,6 +173,29 @@ describe('release', () => {
     clearAgentState(surf);
     const [, payload] = sendMock.mock.calls.at(-1)!;
     expect(payload).toMatchObject({ state: 'unknown', blockedReason: null });
+  });
+
+  it('a PTY exit keeps the session handle the record held, a release does not', () => {
+    reportAgentSession(surf, { sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', provider: 'codex' });
+    clearAgentState(surf);
+    expect(getAgentState(surf)).toBeUndefined();
+    expect(orphanedSession(surf)).toEqual({ provider: 'codex', sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    expect(wasAgentReleased(surf)).toBe(false);
+
+    reportAgentSession(other, { sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    releaseAgent(other);
+    expect(orphanedSession(other)).toBeUndefined();
+    expect(wasAgentReleased(other)).toBe(true);
+  });
+
+  it('a PTY exit does not ask for a prompt save — the saved id does not change', () => {
+    const changed = vi.fn();
+    const off = onAgentSessionChanged(changed);
+    reportAgentSession(surf, { sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    changed.mockClear();
+    clearAgentState(surf);
+    expect(changed).not.toHaveBeenCalled();
+    off();
   });
 });
 
