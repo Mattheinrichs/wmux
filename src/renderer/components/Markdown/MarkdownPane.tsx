@@ -6,10 +6,11 @@ import {
   continueList,
   insertIndent,
   middleEllipsize,
-  renderMarkdown,
   toDisplayPath,
   toRelativePath,
 } from './markdown-utils';
+import { renderMarkdownDocument } from './markdown-document';
+import { hydrateImages, hydrateMath, hydrateMermaid, type UiThemeName } from './markdown-hydrate';
 import '../../styles/markdown.css';
 
 export type MarkdownViewMode = 'preview' | 'source';
@@ -71,6 +72,22 @@ function markdownErrorMessage(
   const key = res?.code ? MARKDOWN_ERROR_KEY[res.code] : undefined;
   if (key) return t(key, res!.error);
   return res?.error || t(fallbackKey, fallbackText);
+}
+
+/**
+ * The app's resolved UI theme, as useUiTheme writes it onto <html>. Read off
+ * the attribute rather than the store: 'system' is resolved there, through an
+ * IPC round trip, and only the attribute knows the answer. Diagrams follow it.
+ */
+function useResolvedUiTheme(): UiThemeName {
+  const read = (): UiThemeName => (document.documentElement.dataset.uiTheme === 'light' ? 'light' : 'dark');
+  const [theme, setTheme] = useState<UiThemeName>(read);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(read()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ui-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return theme;
 }
 
 // ─── Source view ──────────────────────────────────────────────────────────────
@@ -395,10 +412,13 @@ export default function MarkdownPane({
   // says which side wins — see the banner below.
   const [conflict, setConflict] = useState(false);
 
-  // Parse + sanitize lives in markdown-utils so the policy is unit-testable;
-  // see renderMarkdown for why this is a security boundary rather than
-  // formatting. Memoized because sanitizing a large document is not cheap.
-  const html = useMemo(() => renderMarkdown(content ?? ''), [content]);
+  // Parse + sanitize lives in markdown-document/markdown-utils so the policy is
+  // unit-testable; see renderMarkdown for why this is a security boundary
+  // rather than formatting. Memoized because sanitizing a large document is not
+  // cheap. The pane's renderer adds math, mermaid and local-image placeholders
+  // (#380), filled by the effects below once the sanitized HTML is in the DOM.
+  const html = useMemo(() => renderMarkdownDocument(content ?? ''), [content]);
+  const uiTheme = useResolvedUiTheme();
 
   const displayPath = useMemo(
     () => (filePath ? toDisplayPath(filePath, { cwd, homeDir: window.wmux?.system?.homeDir }) : ''),
@@ -483,6 +503,33 @@ export default function MarkdownPane({
       pre.appendChild(btn);
     });
   }, [html, viewMode, editing, copyLabel, copyBlockLabel]);
+
+  // ─── Math, diagrams, local images (#380) ────────────────────────────────────
+
+  // Each run owns the DOM it was started on; `stale` stops a slow import or
+  // IPC answer from writing into a document that has since been replaced.
+  // Editing happens in the source view, so a keystroke never reaches these.
+  useEffect(() => {
+    if (viewMode !== 'preview' || editing) return;
+    const host = contentRef.current;
+    if (!host) return;
+    let stale = false;
+    const isStale = () => stale;
+    void hydrateMath(host, isStale);
+    void hydrateImages(host, filePath ?? null, window.wmux?.markdown?.readImage, isStale);
+    return () => { stale = true; };
+  }, [html, viewMode, editing, filePath]);
+
+  // Separate from the effect above so a theme switch re-renders only the
+  // diagrams, not every image through IPC again.
+  useEffect(() => {
+    if (viewMode !== 'preview' || editing) return;
+    const host = contentRef.current;
+    if (!host) return;
+    let stale = false;
+    void hydrateMermaid(host, uiTheme, () => stale);
+    return () => { stale = true; };
+  }, [html, viewMode, editing, uiTheme]);
 
   const handleContentClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
