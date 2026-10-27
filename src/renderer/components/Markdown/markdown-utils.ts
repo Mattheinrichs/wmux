@@ -79,7 +79,10 @@ export function isNetworkPathRef(value: string): boolean {
 /** Attributes the browser fetches on its own, with no click. */
 const AUTO_FETCH_ATTRS = new Set(['src', 'srcset', 'poster', 'background']);
 
-DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+// Without a DOM (a node-environment test importing a sibling helper) DOMPurify
+// is an inert factory with no addHook and no sanitize; nothing is sanitized
+// there, so there is nothing to guard.
+if (DOMPurify.isSupported) DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
   if (!AUTO_FETCH_ATTRS.has(data.attrName)) return;
   // srcset is a list of "url descriptor" candidates; any one of them fetches.
   const urls = data.attrName === 'srcset'
