@@ -63,6 +63,7 @@ export default function SplitContainer({
           onClearSurfaceDragPreview={onClearSurfaceDragPreview}
           onSurfaceDragCommit={onSurfaceDragCommit}
           onActivate={() => onPaneFocus(node.paneId)}
+          onFocusPane={onPaneFocus}
         />
       </div>
     );

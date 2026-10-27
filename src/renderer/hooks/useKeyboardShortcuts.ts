@@ -168,6 +168,8 @@ export function useKeyboardShortcuts(
       if (!ws) return;
       const newPaneId = `pane-${uuid()}` as PaneId;
       updateSplitTree(activeWorkspaceId, splitNode(ws.splitTree, focusedPaneId, newPaneId, type, dir));
+      // The pane the user just asked for is the one they mean to type into.
+      onFocusPane?.(newPaneId);
     };
 
     const doFocus = (dir: 'left' | 'right' | 'up' | 'down') => {
