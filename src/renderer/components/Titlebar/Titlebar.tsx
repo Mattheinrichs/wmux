@@ -10,7 +10,7 @@ import logoSrc from '../../../../resources/icons/icon.svg';
 import NotificationBell from './NotificationBell';
 import UpdateBadge from './UpdateBadge';
 import KeepAwakeMenu from './KeepAwakeMenu';
-import { IconHelp, IconCode, IconSettings, IconPixelAgent, IconFocus, IconFolder, IconSidebar, IconGitBranch } from './icons';
+import { IconSettings, IconPixelAgent, IconFocus, IconFolder, IconSidebar, IconGitBranch } from './icons';
 import WindowControls, { useIsFramelessWindow } from './WindowControls';
 import { NotificationInfo, WorkspaceId, PaneId, SurfaceId } from '../../../shared/types';
 import { useT } from '../../i18n';
@@ -22,8 +22,6 @@ interface TitlebarProps {
   title?: string;
   sidebarVisible: boolean;
   onToggleSidebar: () => void;
-  onHelpClick?: () => void;
-  onDevToolsClick?: () => void;
   onSettingsClick?: () => void;
   onHubClick?: () => void;
   /** The agent-office easter egg (Settings, General). No pref, no button. */
@@ -51,8 +49,6 @@ export default function Titlebar({
   title,
   sidebarVisible,
   onToggleSidebar,
-  onHelpClick,
-  onDevToolsClick,
   onSettingsClick,
   onHubClick,
   hubEnabled,
@@ -83,6 +79,13 @@ export default function Titlebar({
   // buttons, so this is where they come from.
   const frameless = useIsFramelessWindow();
 
+  // Two groups, one on each side (2.47.0). The titlebar had grown to ten
+  // identical bordered boxes in a row, with no order a newcomer could learn.
+  // LEFT is the layout of THIS window — the sidebar, then the panels that open
+  // beside the focused pane. RIGHT is about the app itself — update, keep-awake,
+  // notifications, settings — where Windows users look for them. Help and the
+  // developer tools moved to Settings → Help: neither is a per-session action,
+  // and both keep their shortcuts and command-palette entries.
   return (
     <div className="titlebar">
       <div className="titlebar__left">
@@ -104,46 +107,7 @@ export default function Titlebar({
         >
           <IconSidebar />
         </button>
-        <button className="titlebar__btn" onClick={onHelpClick} title={t('titlebar.help')}>
-          <IconHelp />
-        </button>
-        <button className="titlebar__btn" onClick={onDevToolsClick} title={t('titlebar.devtools')}>
-          <IconCode />
-        </button>
-        <NotificationBell
-          notifications={notifications}
-          workspaceNames={workspaceNames}
-          isOpen={notificationPanelOpen}
-          onToggle={onToggleNotificationPanel}
-          onJump={onNotificationJump}
-          onMarkAllRead={onMarkAllNotificationsRead}
-        />
-        <UpdateBadge />
-        {hubEnabled && (
-          <button
-            className="titlebar__btn"
-            onClick={onHubClick}
-            title={t('titlebar.hub', 'Agent office')}
-          >
-            <IconPixelAgent />
-          </button>
-        )}
-        <button
-          className="titlebar__btn"
-          onClick={onSettingsClick}
-          title={t('titlebar.settings')}
-        >
-          <IconSettings />
-        </button>
-        <button
-          className={`titlebar__btn${focusMode ? ' titlebar__btn--active' : ''}`}
-          onClick={onToggleFocusMode}
-          title={t('titlebar.focusMode', 'Focus mode: dim every pane but the focused one')}
-          aria-pressed={!!focusMode}
-        >
-          <IconFocus />
-        </button>
-        <KeepAwakeMenu />
+        <span className="titlebar__divider" aria-hidden="true" />
         {onToggleExplorer && (
           <button
             className={`titlebar__btn${explorerOpen ? ' titlebar__btn--active' : ''}`}
@@ -166,8 +130,45 @@ export default function Titlebar({
             <IconGitBranch />
           </button>
         )}
+        <button
+          className={`titlebar__btn${focusMode ? ' titlebar__btn--active' : ''}`}
+          onClick={onToggleFocusMode}
+          title={t('titlebar.focusMode', 'Focus mode: dim every pane but the focused one')}
+          aria-pressed={!!focusMode}
+        >
+          <IconFocus />
+        </button>
       </div>
       <span className="titlebar__title">{title ?? ''}</span>
+      <div className="titlebar__actions">
+        <UpdateBadge />
+        <KeepAwakeMenu />
+        <NotificationBell
+          notifications={notifications}
+          workspaceNames={workspaceNames}
+          isOpen={notificationPanelOpen}
+          onToggle={onToggleNotificationPanel}
+          onJump={onNotificationJump}
+          onMarkAllRead={onMarkAllNotificationsRead}
+        />
+        {hubEnabled && (
+          <button
+            className="titlebar__btn"
+            onClick={onHubClick}
+            title={t('titlebar.hub', 'Agent office')}
+          >
+            <IconPixelAgent />
+          </button>
+        )}
+        <button
+          className="titlebar__btn"
+          onClick={onSettingsClick}
+          title={t('titlebar.settings')}
+          aria-label={t('titlebar.settings')}
+        >
+          <IconSettings />
+        </button>
+      </div>
       <div className="titlebar__right">
         {frameless && <WindowControls />}
       </div>

@@ -66,7 +66,10 @@ describe('titlebar sidebar toggle', () => {
     expect(button.getAttribute('aria-label')).toBe(button.title);
     expect(button.getAttribute('aria-pressed')).toBe('true');
     expect(button.className).toBe('titlebar__btn');
-    expect(button.nextElementSibling?.getAttribute('title')).toBe('titlebar.help');
+    // Help and devtools moved to Settings → Help (2.47.0); a divider now
+    // separates the sidebar toggle from the pane panels.
+    expect(button.nextElementSibling?.className).toBe('titlebar__divider');
+    expect(container.querySelector('[title="titlebar.help"], [title="titlebar.devtools"]')).toBeNull();
     expect(button.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     act(() => button.click());
     expect(store.getState().sidebarVisible).toBe(false);

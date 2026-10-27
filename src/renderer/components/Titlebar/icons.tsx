@@ -30,27 +30,6 @@ export function IconSidebar({ className, size = 16 }: IconProps) {
   );
 }
 
-/** Help — question mark in a circle. */
-export function IconHelp({ className, size = 16 }: IconProps) {
-  return (
-    <svg className={className} width={size} height={size} viewBox="0 0 24 24" strokeWidth={2} {...base} aria-hidden="true">
-      <circle cx="12" cy="12" r="9.5" />
-      <path d="M9.2 9.2a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.8-2.8 2.8" />
-      <path d="M12 17.2h.01" />
-    </svg>
-  );
-}
-
-/** DevTools — angle brackets. Replaces the literal `</>` text glyph. */
-export function IconCode({ className, size = 16 }: IconProps) {
-  return (
-    <svg className={className} width={size} height={size} viewBox="0 0 24 24" strokeWidth={2} {...base} aria-hidden="true">
-      <path d="m16 18 6-6-6-6" />
-      <path d="m8 6-6 6 6 6" />
-    </svg>
-  );
-}
-
 /** Notifications — outline bell with clapper. */
 export function IconBell({ className, size = 16 }: IconProps) {
   return (

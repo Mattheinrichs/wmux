@@ -13,7 +13,7 @@
 .titlebar__left {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   -webkit-app-region: no-drag;
   flex-shrink: 0;
 }
@@ -37,6 +37,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The app-level group (update, keep-awake, notifications, settings), kept
+   against the caption buttons so the left side only holds the layout of the
+   window. Its dropdowns open toward the window, see the end of this file. */
+.titlebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* Separates the sidebar toggle from the panels that open beside a pane. */
+.titlebar__divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: rgba(var(--ui-overlay-rgb),0.1);
+  flex-shrink: 0;
 }
 
 .titlebar__right {
@@ -93,8 +114,10 @@
   width: 28px;
   height: 28px;
   background: none;
-  border: 1px solid rgba(var(--ui-overlay-rgb),0.08);
-  color: rgba(var(--ui-overlay-rgb),0.4);
+  /* Transparent at rest, not absent: the border keeps its pixel so a hover or
+     an active state never shifts the row. */
+  border: 1px solid transparent;
+  color: rgba(var(--ui-overlay-rgb),0.5);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -112,7 +135,6 @@
 .titlebar__btn:hover {
   color: rgba(var(--ui-overlay-rgb),0.9);
   background: rgba(var(--ui-overlay-rgb),0.08);
-  border-color: rgba(var(--ui-overlay-rgb),0.15);
 }
 
 /* A toggle that is on (focus mode). */
@@ -120,7 +142,7 @@
 .titlebar__btn--active:hover {
   color: rgba(var(--ui-overlay-rgb),0.95);
   background: rgba(var(--ui-overlay-rgb),0.12);
-  border-color: rgba(var(--ui-overlay-rgb),0.3);
+  border-color: rgba(var(--ui-overlay-rgb),0.18);
 }
 
 .titlebar__update-badge {
@@ -266,3 +288,11 @@
 .keep-awake-panel__content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .keep-awake-panel__label { font-size: 12px; font-weight: 600; color: rgba(var(--ui-overlay-rgb), 0.85); }
 .keep-awake-panel__hint { font-size: 11px; color: rgba(var(--ui-overlay-rgb), 0.4); }
+
+/* The bell and keep-awake sit at the right edge now, so their panels align to
+   the button's right side; anchored left they would run off the window. */
+.titlebar__actions .notif-panel,
+.titlebar__actions .keep-awake-panel {
+  left: auto;
+  right: 0;
+}

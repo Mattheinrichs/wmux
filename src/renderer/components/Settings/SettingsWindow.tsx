@@ -44,9 +44,11 @@ interface SettingsWindowProps {
   onClose: () => void;
   /** The tab to open on. Read once, at mount; the user can switch away freely. */
   initialTab?: SettingsTab;
+  /** Help → tutorial. The tutorial is App state, so Settings asks for it. */
+  onOpenTutorial?: () => void;
 }
 
-export default function SettingsWindow({ onClose, initialTab }: SettingsWindowProps) {
+export default function SettingsWindow({ onClose, initialTab, onOpenTutorial }: SettingsWindowProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'Terminal');
   const t = useT();
 
@@ -93,7 +95,7 @@ export default function SettingsWindow({ onClose, initialTab }: SettingsWindowPr
             {/* Mounted only while selected, so opening Settings never fires the
                 GitHub fetch for a user who came here to change their font. */}
             {activeTab === 'Changelog' && <ChangelogSettings />}
-            {activeTab === 'Help' && <HelpSettings />}
+            {activeTab === 'Help' && <HelpSettings onOpenTutorial={onOpenTutorial} />}
           </div>
         </div>
       </div>

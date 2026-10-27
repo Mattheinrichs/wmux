@@ -1705,13 +1705,17 @@ export default function App() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {tutorialOpen && <Tutorial onClose={handleTutorialClose} />}
-      {settingsOpen && <SettingsWindow initialTab={settingsTab} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsWindow
+          initialTab={settingsTab}
+          onClose={() => setSettingsOpen(false)}
+          onOpenTutorial={() => { setSettingsOpen(false); setTutorialOpen(true); }}
+        />
+      )}
       <Titlebar
         title={titlebarText}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={toggleSidebar}
-        onHelpClick={() => setTutorialOpen(true)}
-        onDevToolsClick={() => window.wmux?.system?.toggleDevTools?.()}
         onSettingsClick={() => openSettings()}
         onHubClick={() => setHubOpen(true)}
         hubEnabled={hubEnabled}

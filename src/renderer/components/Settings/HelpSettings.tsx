@@ -12,7 +12,12 @@ const REPO_URL = 'https://github.com/amirlehmam/wmux';
 const ISSUES_URL = `${REPO_URL}/issues`;
 const WEBSITE_URL = 'https://wmux.org';
 
-export default function HelpSettings() {
+interface HelpSettingsProps {
+  /** Closes Settings and starts the tutorial. Absent, the button is hidden. */
+  onOpenTutorial?: () => void;
+}
+
+export default function HelpSettings({ onOpenTutorial }: HelpSettingsProps = {}) {
   const t = useT();
   const [version, setVersion] = useState('');
   const { update, state, upToDate, trigger } = useUpdate();
@@ -92,6 +97,22 @@ export default function HelpSettings() {
           onClick={() => openExternal(WEBSITE_URL)}
         >
           {t('settings.help.website')}
+        </button>
+      </div>
+
+      {/* The tutorial and the developer tools lived in the titlebar until
+          2.47.0. Neither is a per-session action, so they moved here. */}
+      <div className="settings-row">
+        {onOpenTutorial && (
+          <button className="settings-btn settings-btn--secondary" onClick={onOpenTutorial}>
+            {t('titlebar.help')}
+          </button>
+        )}
+        <button
+          className="settings-btn settings-btn--secondary"
+          onClick={() => window.wmux?.system?.toggleDevTools?.()}
+        >
+          {t('titlebar.devtools')}
         </button>
       </div>
 
