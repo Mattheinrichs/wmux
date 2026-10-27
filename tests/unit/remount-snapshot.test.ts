@@ -190,6 +190,19 @@ describe('RemountSnapshotCache', () => {
     expect(cache.take('b', true)?.text).toBe('b');
     expect(cache.take('c', true)?.text).toBe('c');
   });
+
+  it('forgets a closed surface whose snapshot was never taken back (#385)', () => {
+    const cache = new RemountSnapshotCache({ capacity: 32, isOpen: () => true });
+    cache.retire('a', () => ({ text: 'scrollback', cols: COLS, rows: ROWS }));
+    cache.retire('b', () => ({ text: 'other', cols: COLS, rows: ROWS }));
+    expect(cache.size).toBe(2);
+
+    cache.forget('a');
+
+    expect(cache.size).toBe(1);
+    expect(cache.take('a', true)).toBeUndefined();
+    expect(cache.take('b', true)?.text).toBe('other');
+  });
 });
 
 describe('useTerminal wiring', () => {

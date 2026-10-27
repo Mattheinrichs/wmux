@@ -106,4 +106,18 @@ export class RemountSnapshotCache {
     this.entries.delete(surfaceId);
     return ptyReused ? snapshot : undefined;
   }
+
+  /**
+   * The surface was closed (#385). A snapshot taken while it was still open
+   * and never taken back — its replacement never mounted — would otherwise
+   * hold a whole serialized scrollback until 32 newer ones pushed it out.
+   */
+  forget(surfaceId: string): void {
+    this.entries.delete(surfaceId);
+  }
+
+  /** Entries held; for tests. */
+  get size(): number {
+    return this.entries.size;
+  }
 }

@@ -238,6 +238,48 @@ function applyInsertion(
   try { term.focus(); } catch { /* no-op */ }
 }
 
+/** Ctrl+click on a file path printed in the terminal; needs a surface to jail against. */
+function registerFileLinks(
+  terminal: Terminal,
+  surfaceId: SurfaceId | undefined,
+  handlers: Parameters<typeof createFileLinkProvider>[2],
+): void {
+  if (!surfaceId) return;
+  terminal.registerLinkProvider(createFileLinkProvider(
+    terminal,
+    (path) => terminalFileLinkExists(surfaceId, path),
+    handlers,
+  ));
+}
+
+/** Buffer switches and resizes for `wmux read-screen --events`; none without a surface. */
+function trackScreenEventsFor(surfaceId: string | undefined, terminal: Terminal) {
+  return surfaceId ? trackScreenEvents(surfaceId, terminal) : undefined;
+}
+
+/** Read layout so a removed animation class takes effect before it is re-added. */
+function forceReflow(host: HTMLElement): number {
+  return host.offsetWidth;
+}
+
+/** The surface's own value, else the user's default, else '' (main decides). */
+function withPreference(own: string | undefined, preferred: string | undefined): string {
+  return own || preferred || '';
+}
+
+/**
+ * The size to spawn a PTY at: the already-measured terminal, or nothing for a
+ * hidden or not-yet-laid-out one (the PTY then starts at its default and is
+ * resized when first shown).
+ */
+function proposeInitialDims(fitAddon: FitAddon): { cols?: number; rows?: number } {
+  try {
+    const dims = fitAddon.proposeDimensions();
+    if (dims && dims.cols > 0 && dims.rows > 0) return { cols: dims.cols, rows: dims.rows };
+  } catch { /* element not measurable yet — fall back to PTY default */ }
+  return {};
+}
+
 /**
  * The visual bell (#335): a class on the xterm container whose ::after overlay
  * fades out. Removing and re-adding the class (with a forced reflow between)
@@ -246,7 +288,7 @@ function applyInsertion(
 function flashBell(host: HTMLElement | null): void {
   if (!host) return;
   host.classList.remove('terminal-pane__container--bell');
-  void host.offsetWidth;
+  forceReflow(host);
   host.classList.add('terminal-pane__container--bell');
   // Matched by name: animationend bubbles, and xterm's own children animate.
   const done = (ev: AnimationEvent) => {
@@ -528,6 +570,51 @@ export function forgetSurfaceTitle(surfaceId: string): void {
 }
 
 /**
+ * Drop every module map entry a CLOSED terminal surface left behind (#385).
+ *
+ * Called from the destructive-close chokepoint (SURFACE_CLOSED_EVENT), never
+ * from unmount: a terminal rebuilt on a live PTY needs all of these back. The
+ * PTY-exit handler cleared the mouse modes and wheel remainder, but a close
+ * unsubscribes that handler when the terminal unmounts, before the exit of the
+ * PTY the close just killed comes back from main — so for a closed pane it
+ * never ran, and every one of these kept an entry per surface ever opened.
+ */
+export function forgetClosedTerminal(surfaceId: string): void {
+  forgetSurfaceTitle(surfaceId);
+  surfaceMouseModes.delete(surfaceId);
+  wheelLineAccum.delete(surfaceId);
+  touchReportCarry.delete(surfaceId);
+  surfaceOutputSeq.delete(surfaceId);
+  pendingPaneNotices.delete(surfaceId);
+  surfaceBufferCache.forget(surfaceId);
+}
+
+/** Which of the per-surface module maps above still hold `surfaceId`. Test seam. */
+export function __terminalStateEntries(surfaceId: string): string[] {
+  const held: Array<[string, { has(id: string): boolean }]> = [
+    ['title', surfaceTitle],
+    ['titleFlush', titleFlushTimers],
+    ['mouseModes', surfaceMouseModes],
+    ['wheel', wheelLineAccum],
+    ['touch', touchReportCarry],
+    ['outputSeq', surfaceOutputSeq],
+    ['notices', pendingPaneNotices],
+  ];
+  return held.filter(([, map]) => map.has(surfaceId)).map(([name]) => name);
+}
+
+/** Test seam: seed the per-surface maps the way a live terminal would. */
+export function __seedTerminalState(surfaceId: string): void {
+  surfaceTitle.set(surfaceId, 'title');
+  mouseModesFor(surfaceId);
+  wheelLineAccum.set(surfaceId, 0.5);
+  touchReportCarry.set(surfaceId, 0.25);
+  surfaceOutputSeq.set(surfaceId, 1);
+  showPaneNotice(surfaceId, 'held back');
+  publishTitle(surfaceId);
+}
+
+/**
  * Wire a terminal up to the prompt log (issue #207): OSC 133 in, scroll out.
  *
  * Module-level, like `recordTitleChanges` above, for the same two reasons — the
@@ -790,7 +877,7 @@ function scheduleDeferredRepaint(terminal: Terminal): ReturnType<typeof setTimeo
       try {
         terminal.scrollToBottom();
         terminal.refresh(0, terminal.rows - 1);
-      } catch {}
+      } catch { /* best effort */ }
     });
   }, 300);
 }
@@ -1012,13 +1099,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     terminal.loadAddon(unicode11Addon);
     terminal.loadAddon(imageAddon);
     terminal.loadAddon(serializeAddon);
-    if (linkSurfaceId) {
-      terminal.registerLinkProvider(createFileLinkProvider(
-        terminal,
-        (path) => terminalFileLinkExists(linkSurfaceId, path),
-        links.fileLinkHandlers,
-      ));
-    }
+    registerFileLinks(terminal, linkSurfaceId, links.fileLinkHandlers);
     terminal.unicode.activeVersion = '11';
 
     // OSC 9;4 progress (ConEmu/Windows Terminal convention) → store, keyed by
@@ -1074,7 +1155,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     }
 
     const titleDisposable = recordTitleChanges(terminal, surfaceId);
-    const screenEventsDisposable = surfaceId ? trackScreenEvents(surfaceId, terminal) : undefined;
+    const screenEventsDisposable = trackScreenEventsFor(surfaceId, terminal);
 
     // Restore a buffer snapshot captured before a previous unmount (issue #49).
     // Run by the PTY lookup below, just before it attaches, so the restored
@@ -1571,7 +1652,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
           const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
           const text = new TextDecoder('utf-8').decode(bytes);
           if (text) window.wmux?.clipboard?.writeText?.(text);
-        } catch {}
+        } catch { /* best effort */ }
       }
       return true;
     });
@@ -1771,7 +1852,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
 
     // Resolve effective shell: explicit (workspace) > user default preference > main-process fallback.
     // Read prefs at spawn time so changing the default later doesn't re-spawn live PTYs.
-    const effectiveShell = shell || useStore.getState().workspacePrefs.defaultShell || '';
+    const effectiveShell = withPreference(shell, useStore.getState().workspacePrefs.defaultShell);
 
     // Same rule for the directory (issue #205): the surface's own cwd wins —
     // a split inheriting its parent, "Open in wmux", `--cwd`, a restored
@@ -1780,7 +1861,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     // spawn time for the same reason as the shell: changing it must not
     // re-spawn the PTYs already running. Left as the user typed it; `~` and
     // `%VAR%` are expanded in the main process by resolveSpawnCwd.
-    const effectiveCwd = cwd || useStore.getState().workspacePrefs.defaultCwd || '';
+    const effectiveCwd = withPreference(cwd, useStore.getState().workspacePrefs.defaultCwd);
 
     // Spawn the PTY at the already-measured terminal size. Otherwise it starts at
     // the 80x24 default and our follow-up resize triggers a window-size-change in
@@ -1789,19 +1870,15 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     // the default, then resizes correctly when first shown (that redraw isn't
     // visible). proposeDimensions needs the element laid out, which it is after
     // terminal.open() above.
-    let initialCols: number | undefined;
-    let initialRows: number | undefined;
-    try {
-      const dims = fitAddon.proposeDimensions();
-      if (dims && dims.cols > 0 && dims.rows > 0) {
-        initialCols = dims.cols;
-        initialRows = dims.rows;
-      }
-    } catch { /* element not measurable yet — fall back to PTY default */ }
+    const { cols: initialCols, rows: initialRows } = proposeInitialDims(fitAddon);
 
     // If surfaceId is given AND a PTY already exists for it (agent spawn or re-mount), attach to it
     if (surfaceId && window.wmux.pty.has) {
       window.wmux.pty.has(surfaceId).then((exists: boolean) => {
+        // Torn down while has() was in flight (#385): attaching now would add
+        // PTY listeners after the cleanup that removes them already ran, and
+        // they would hold this disposed terminal for the life of the window.
+        if (disposed) return;
         if (exists) {
           restoreSurfaceState(true);
           attachToPty(surfaceId!);
@@ -1894,7 +1971,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
         // pty.resize() call above and redraw themselves. A premature refresh here
         // would paint stale/clipped buffer content before their redraw arrives.
         if (!surfaceId || !isMouseTracking(surfaceMouseModes.get(surfaceId))) {
-          try { terminal.refresh(0, terminal.rows - 1); } catch {}
+          try { terminal.refresh(0, terminal.rows - 1); } catch { /* best effort */ }
         }
       });
     });
