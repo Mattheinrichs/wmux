@@ -10,7 +10,7 @@ import SplitContainer from './components/SplitPane/SplitContainer';
 import { TerminalHost } from './components/Terminal/KeptAliveTerminal';
 import { updateRatio, getAllPaneIds, findLeaf, replaceSoleTerminalSurface, freezeSurfaceCwds, dropEphemeralSurfaces, dropCodeContent, workspaceHasTerminalCwd } from './store/split-utils';
 import { forgetProgressTurn } from './utils/progress-turn';
-import { type ShellState, previousSurfaceShellState, recordSurfaceShellState, treeSurfaceIds, workspaceShellState } from './utils/surface-shell-state';
+import { type ShellState, forgetSurfaceShellState, previousSurfaceShellState, recordSurfaceShellState, treeSurfaceIds, workspaceShellState } from './utils/surface-shell-state';
 import { DEFAULT_DEV_PORTS, mergeDevPorts, matchDevPorts, firstNewDevPort } from './dev-ports';
 import { aggregateProgress } from './store/progress-slice';
 import { isDiffTabDismissed } from './store/surface-slice';
@@ -56,7 +56,7 @@ import type {
   SurfaceDragPreviewTarget,
 } from './components/SplitPane/drag-preview-types';
 import { buildSurfaceDragPreview } from './components/SplitPane/surface-drag-preview';
-import { forgetSurfaceTitle, surfaceTerminalRegistry } from './hooks/useTerminal';
+import { forgetClosedTerminal, surfaceTerminalRegistry } from './hooks/useTerminal';
 import { forgetSurface as forgetPromptLog, hookEventSurface, recordAgentPrompt } from './utils/prompt-log';
 import { forgetAlternateScreen, RESET_TERMINAL_LEAVE_ALT_ACTION } from './utils/alt-screen-owner';
 import { SURFACE_CLOSED_EVENT } from './store/pty-teardown';
@@ -233,6 +233,20 @@ async function restoreNamedSession(t: T, setWidth: SetWidth): Promise<boolean> {
   }
 }
 
+/** The palette's two Reset terminal state entries (#175, #357). */
+function isPaletteResetAction(action: string): boolean {
+  return action === 'resetTerminal' || action === RESET_TERMINAL_LEAVE_ALT_ACTION;
+}
+
+/** Reset the focused terminal from the palette; nothing when it is not a terminal. */
+function dispatchPaletteReset(action: string, terminalSurfaceId: string | null): void {
+  if (!terminalSurfaceId) return;
+  // The palette's second entry skips the keep-then-press-again step
+  // (#357): choosing it by name already says "leave it anyway".
+  const leaveAlternateScreen = action === RESET_TERMINAL_LEAVE_ALT_ACTION;
+  document.dispatchEvent(new CustomEvent('wmux:reset-terminal', { detail: { surfaceId: terminalSurfaceId, leaveAlternateScreen } }));
+}
+
 function fireNotification(
   surfaceId: string,
   workspaceId: WorkspaceId | null,
@@ -318,7 +332,7 @@ function handlePortsUpdate(cmd: any, updateWorkspaceMetadata: StoreAction): void
     for (const ws of useStore.getState().workspaces) {
       updateWorkspaceMetadata(ws.id, { ports: devPorts.length > 0 ? devPorts : undefined });
     }
-  } catch {}
+  } catch { /* best effort */ }
 }
 
 /** `wmux notify <text>` — works even outside a pane (falls back to active workspace). */
@@ -1015,11 +1029,24 @@ export default function App() {
       useStore.getState().clearPromptsForSurface(surfaceId);
       // Both halves, in this order: the module map AND its pending throttle
       // timer first, or a flush already armed re-publishes the title into the
-      // store a moment after the store entry was dropped.
-      forgetSurfaceTitle(surfaceId);
+      // store a moment after the store entry was dropped. forgetClosedTerminal
+      // does the title first, then the rest of the terminal's per-surface maps
+      // (#385) — mouse modes, wheel/touch remainders, output counter, parked
+      // notices, a stale remount snapshot.
+      forgetClosedTerminal(surfaceId);
       useStore.getState().clearOscTitle(surfaceId);
       // Reset terminal state's record of the alternate screen (#357).
       forgetAlternateScreen(surfaceId);
+      // The PTY-exit path clears these too, but a closed pane's exit handler
+      // is unsubscribed before the exit of its PTY comes back (#385).
+      forgetProgressTurn(surfaceId);
+      forgetSurfaceShellState(surfaceId);
+      setClaudeActivity((prev) => {
+        if (!(surfaceId in prev)) return prev;
+        const next = { ...prev };
+        delete next[surfaceId];
+        return next;
+      });
     };
     document.addEventListener(SURFACE_CLOSED_EVENT, handler);
     return () => document.removeEventListener(SURFACE_CLOSED_EVENT, handler);
@@ -1446,13 +1473,8 @@ export default function App() {
     const surface = leaf?.surfaces[leaf.activeSurfaceIndex];
     const terminalSurfaceId = surface?.type === 'terminal' ? surface.id : null;
 
-    if (action === 'resetTerminal' || action === RESET_TERMINAL_LEAVE_ALT_ACTION) {
-      if (terminalSurfaceId) {
-        // The palette's second entry skips the keep-then-press-again step
-        // (#357): choosing it by name already says "leave it anyway".
-        const leaveAlternateScreen = action === RESET_TERMINAL_LEAVE_ALT_ACTION;
-        document.dispatchEvent(new CustomEvent('wmux:reset-terminal', { detail: { surfaceId: terminalSurfaceId, leaveAlternateScreen } }));
-      }
+    if (isPaletteResetAction(action)) {
+      dispatchPaletteReset(action, terminalSurfaceId);
     } else if (action === 'togglePromptOutline') {
       togglePromptOutlineFor(
         terminalSurfaceId,

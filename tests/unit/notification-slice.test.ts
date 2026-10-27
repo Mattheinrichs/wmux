@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { create } from 'zustand';
 import { createWorkspaceSlice, WorkspaceSlice } from '../../src/renderer/store/workspace-slice';
-import { createNotificationSlice, NotificationSlice } from '../../src/renderer/store/notification-slice';
+import { createNotificationSlice, MAX_NOTIFICATIONS, NotificationSlice } from '../../src/renderer/store/notification-slice';
 import { WorkspaceId, SurfaceId } from '../../src/shared/types';
 
 type TestStore = WorkspaceSlice & NotificationSlice;
@@ -92,5 +92,51 @@ describe('notification-slice', () => {
     useStore.getState().addNotification({ surfaceId, workspaceId, text: 'x' });
     useStore.getState().markRead(surfaceId);
     expect(useStore.getState().jumpToUnread()).toBeNull();
+  });
+  // Issue #385: the cap only ever evicted READ notifications, so unread ones —
+  // the normal state for agent panes in workspaces nobody is looking at, and
+  // the only state for a closed workspace's — accumulated without limit.
+  describe('retention (#385)', () => {
+    it('stays bounded when nothing is ever read', () => {
+      for (let i = 0; i < MAX_NOTIFICATIONS * 5; i++) {
+        useStore.getState().addNotification({ surfaceId, workspaceId, text: `turn ${i}` });
+      }
+      const notifs = useStore.getState().notifications;
+      expect(notifs.length).toBe(MAX_NOTIFICATIONS);
+      // The newest are the ones kept.
+      expect(notifs[notifs.length - 1].text).toBe(`turn ${MAX_NOTIFICATIONS * 5 - 1}`);
+      expect(notifs[0].text).toBe(`turn ${MAX_NOTIFICATIONS * 4}`);
+    });
+
+    it('keeps the unread counter equal to the unread notifications that still exist', () => {
+      for (let i = 0; i < MAX_NOTIFICATIONS + 50; i++) {
+        useStore.getState().addNotification({ surfaceId, workspaceId, text: `n${i}` });
+      }
+      const ws = useStore.getState().workspaces.find((w) => w.id === workspaceId);
+      const unread = useStore.getState().notifications.filter((n) => !n.read).length;
+      expect(ws?.unreadCount).toBe(unread);
+    });
+
+    it('evicts read notifications before unread ones', () => {
+      const other = 'surf-other' as SurfaceId;
+      useStore.getState().addNotification({ surfaceId: other, workspaceId, text: 'unread-old' });
+      for (let i = 0; i < MAX_NOTIFICATIONS - 1; i++) {
+        useStore.getState().addNotification({ surfaceId, workspaceId, text: `read ${i}` });
+      }
+      useStore.getState().markRead(surfaceId);
+      useStore.getState().addNotification({ surfaceId, workspaceId, text: 'newest' });
+      const texts = useStore.getState().notifications.map((n) => n.text);
+      expect(texts.length).toBe(MAX_NOTIFICATIONS);
+      expect(texts).toContain('unread-old');
+      expect(texts).not.toContain('read 0');
+    });
+
+    it('drops the notifications of a workspace that is closed', () => {
+      const keep = useStore.getState().createWorkspace({ title: 'Keep' });
+      useStore.getState().addNotification({ surfaceId, workspaceId, text: 'gone' });
+      useStore.getState().addNotification({ surfaceId, workspaceId: keep, text: 'stays' });
+      useStore.getState().closeWorkspace(workspaceId);
+      expect(useStore.getState().notifications.map((n) => n.text)).toEqual(['stays']);
+    });
   });
 });

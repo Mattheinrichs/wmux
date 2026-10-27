@@ -270,6 +270,12 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
         pendingCloseWorktree: state.pendingCloseWorktree?.id === id ? null : state.pendingCloseWorktree,
       };
     });
+    // Its notifications can no longer be read by focusing a pane, so they
+    // would sit in the bell for the life of the window (#385). The notification
+    // slice is composed beside this one at runtime; this creator is typed for
+    // its own slice only, as with workspacePrefs below.
+    (get() as unknown as { clearWorkspaceNotifications?: (wsId: WorkspaceId) => void })
+      .clearWorkspaceNotifications?.(id);
   },
 
   requestCloseWorkspace(id: WorkspaceId): void {
@@ -312,7 +318,8 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice> = (set, get) => 
       workspaces: state.workspaces.map((w) => {
         if (w.id !== id) return w;
         // A chosen name stops following the window title.
-        const { titleIsDefault: _dropped, ...rest } = w;
+        const rest = { ...w };
+        delete rest.titleIsDefault;
         return { ...rest, title };
       }),
     }));
