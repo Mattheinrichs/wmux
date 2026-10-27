@@ -1,7 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readRenderedInstructions } from './agent-instructions';
+import {
+  SKILL_OWNER_MARKER,
+  buildContextStub,
+  buildSkillFile,
+  getCliBinDirForInstructions,
+  readRenderedInstructions,
+} from './agent-instructions';
 
 const START_MARKER = '<!-- wmux:start';
 const END_MARKER = '<!-- wmux:end -->';
@@ -127,8 +133,15 @@ export function ensureClaudeContext(): void {
     // Rendered rather than read: the block carries this install's absolute CLI
     // path, so a session that wmux did not spawn (and therefore has no `wmux`
     // on PATH) can still tell "not running" from "not reachable" — issue #158.
-    const wmuxBlock = readRenderedInstructions();
-    if (wmuxBlock === null) return;
+    const fullBlock = readRenderedInstructions();
+    if (fullBlock === null) return;
+    // The skill holds the guidance and CLAUDE.md keeps a stub (issue #386) —
+    // but only once the skill is really on disk and really ours. Otherwise the
+    // full block stays inline, as before: a stub pointing at nothing is worse
+    // than the 118 lines it replaced.
+    const wmuxBlock = ensureClaudeSkill(fullBlock)
+      ? buildContextStub(getCliBinDirForInstructions(), getClaudeSkillPath())
+      : fullBlock;
     const claudeMdPath = getClaudeMdPath();
     const claudeDir = path.dirname(claudeMdPath);
 
@@ -217,6 +230,7 @@ export function stripWmuxBlock(content: string): string | null {
  * for.
  */
 export function removeClaudeContext(): void {
+  removeClaudeSkill();
   try {
     const claudeMdPath = getClaudeMdPath();
     if (!fs.existsSync(claudeMdPath)) return;
@@ -227,6 +241,50 @@ export function removeClaudeContext(): void {
     console.log('[wmux] Removed wmux context from ~/.claude/CLAUDE.md');
   } catch (err) {
     console.warn('[wmux] Failed to remove Claude context:', err);
+  }
+}
+
+export function getClaudeSkillPath(): string {
+  return path.join(os.homedir(), '.claude', 'skills', 'wmux', 'SKILL.md');
+}
+
+const isOurSkill = (content: string): boolean => content.includes(SKILL_OWNER_MARKER);
+
+/**
+ * Write wmux's guidance as `~/.claude/skills/wmux/SKILL.md` (issue #386).
+ * Returns whether the skill on disk is now ours and current. A SKILL.md there
+ * without our marker is the user's own skill of the same name: it is left
+ * exactly as it is, and the caller falls back to the inline block.
+ */
+export function ensureClaudeSkill(renderedBlock: string): boolean {
+  try {
+    const skillPath = getClaudeSkillPath();
+    const wanted = buildSkillFile(renderedBlock);
+    if (fs.existsSync(skillPath)) {
+      const current = fs.readFileSync(skillPath, 'utf-8');
+      if (!isOurSkill(current)) return false;
+      if (current === wanted) return true;
+    }
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, wanted, 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn('[wmux] Failed to write the wmux skill:', err);
+    return false;
+  }
+}
+
+/** The inverse: our SKILL.md, then its folder if nothing else is in it. */
+export function removeClaudeSkill(): void {
+  try {
+    const skillPath = getClaudeSkillPath();
+    if (!fs.existsSync(skillPath) || !isOurSkill(fs.readFileSync(skillPath, 'utf-8'))) return;
+    fs.unlinkSync(skillPath);
+    const dir = path.dirname(skillPath);
+    if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+    console.log('[wmux] Removed the wmux skill from ~/.claude/skills');
+  } catch (err) {
+    console.warn('[wmux] Failed to remove the wmux skill:', err);
   }
 }
 
