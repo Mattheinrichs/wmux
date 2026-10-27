@@ -11,12 +11,13 @@
  * has to import the detector that `ipc-handlers` owns.
  */
 
-import { clipboard } from 'electron';
+import { clipboard, type NativeImage } from 'electron';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { windowsTerminalQuote, posixShellQuote } from './shell-quote';
 import { uploadFiles } from './remote-upload';
+import { encodeBgraPng, fitImageSize } from './clipboard-image';
 import type { DetectedSsh } from './ssh-argv';
 import type { InsertionResult } from '../shared/types';
 
@@ -93,7 +94,9 @@ export class SurfaceInsertionQueue {
       () => undefined,
     );
 
-    void queuedEntry.tail.finally(() => {
+    // `tail` never rejects (both handlers above resolve), so this cannot leak
+    // an unhandled rejection.
+    queuedEntry.tail.then(() => {
       queuedEntry.pending -= 1;
       if (queuedEntry.pending === 0 && this.entries.get(surfaceId) === queuedEntry) {
         this.entries.delete(surfaceId);
@@ -122,21 +125,49 @@ export function remoteInsertionText(paths: string[]): string {
 }
 
 /**
+ * A pasted image, captured off the clipboard but not yet on disk (#381).
+ *
+ * `bitmap` is the normal case: Skia's BGRA pixels, copied synchronously so the
+ * paste keeps its snapshot of the clipboard, and encoded later off the main
+ * thread. `png` is the fallback for a bitmap whose length does not match its
+ * size — Chromium's own encoder, the pre-#381 behaviour, rather than a guess.
+ */
+export type CapturedImage =
+  | { kind: 'bitmap'; bitmap: Buffer; width: number; height: number }
+  | { kind: 'png'; png: Buffer };
+
+/**
+ * What the clipboard held at the moment of the gesture. Everything but an
+ * image is already a `PasteSource`; an image becomes one once it is written
+ * (`materializeClipboard`).
+ */
+export type ClipboardSnapshot = PasteSource | { kind: 'image'; image: CapturedImage };
+
+export interface ClipboardReadOptions {
+  /**
+   * Shrink an image to the largest size Claude Code would keep
+   * (`[paste] downscale-images`, default true) — see `clipboard-image.ts`.
+   */
+  downscaleImages?: boolean;
+}
+
+/**
  * Read the clipboard into whatever the paste should be made of.
  *
  * Order matters. A screenshot is an image with no text, and a file copied in
  * Explorer is a *file reference* with neither an image nor text — which is why
  * checking only `readImage()` made that paste do nothing at all while dragging
  * the same file worked.
+ *
+ * Synchronous on purpose, image included: the caller snapshots the clipboard
+ * BEFORE queueing, so a slow earlier upload cannot make this gesture paste
+ * whatever is on the clipboard later. Only the encode and the write are
+ * deferred, to `materializeClipboard`.
  */
-export function readClipboardSource(): PasteSource {
+export function readClipboardSource(options: ClipboardReadOptions = {}): ClipboardSnapshot {
   const image = clipboard.readImage();
   if (!image.isEmpty()) {
-    const dir = path.join(os.tmpdir(), 'wmux');
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `screenshot-${Date.now()}.png`);
-    fs.writeFileSync(file, image.toPNG());
-    return { kind: 'files', localPaths: [file] };
+    return { kind: 'image', image: captureImage(image, options.downscaleImages !== false) };
   }
 
   // Explorer's Ctrl+C. Electron does not surface CF_HDROP on Windows — it
@@ -150,6 +181,38 @@ export function readClipboardSource(): PasteSource {
   return text ? { kind: 'text', text } : { kind: 'none' };
 }
 
+function captureImage(image: NativeImage, downscale: boolean): CapturedImage {
+  const size = image.getSize(1);
+  const target = downscale ? fitImageSize(size.width, size.height) : size;
+  const scaled =
+    target.width === size.width && target.height === size.height
+      ? image
+      : image.resize({ width: target.width, height: target.height, quality: 'good' });
+  const actual = scaled.getSize(1);
+  const bitmap = scaled.toBitmap({ scaleFactor: 1 });
+  if (bitmap.length !== actual.width * actual.height * 4) return { kind: 'png', png: scaled.toPNG() };
+  return { kind: 'bitmap', bitmap, width: actual.width, height: actual.height };
+}
+
+/**
+ * Write a captured image to `%TEMP%/wmux` and answer with its path; anything
+ * else passes through unchanged. Async end to end, so neither the encode nor
+ * the write holds the main thread.
+ */
+export async function materializeClipboard(
+  snapshot: ClipboardSnapshot,
+  dir: string = path.join(os.tmpdir(), 'wmux'),
+): Promise<PasteSource> {
+  if (snapshot.kind !== 'image') return snapshot;
+  const { image } = snapshot;
+  const png =
+    image.kind === 'bitmap' ? await encodeBgraPng(image.bitmap, image.width, image.height) : image.png;
+  await fs.promises.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `screenshot-${Date.now()}.png`);
+  await fs.promises.writeFile(file, png);
+  return { kind: 'files', localPaths: [file] };
+}
+
 function clipboardFilePath(): string | null {
   let raw: Buffer;
   try {
@@ -158,8 +221,15 @@ function clipboardFilePath(): string | null {
     return null;
   }
   if (!raw || raw.length === 0) return null;
-  const filePath = raw.toString('ucs2').replace(/\0+$/, '').trim();
+  const filePath = trimTrailingNuls(raw.toString('ucs2')).trim();
   return filePath && isRegularFile(filePath) ? filePath : null;
+}
+
+/** `FileNameW` is NUL-terminated (and may be padded); drop the terminators. */
+function trimTrailingNuls(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.codePointAt(end - 1) === 0) end--;
+  return value.slice(0, end);
 }
 
 /**

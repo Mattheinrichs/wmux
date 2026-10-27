@@ -97,6 +97,10 @@ auto-open = true
 upload-on-paste = true
 upload-on-drop  = true
 
+[paste]
+# Shrink a pasted image to the largest size Claude Code keeps (see "Pasted images").
+downscale-images = true
+
 [keys]
 # Remap what a key sends to the terminal (see "Key remaps" below).
 "ctrl+k"       = "<C-k><Delete>"   # kill to end of line, then pull the next line up
@@ -246,6 +250,27 @@ process tree. wmux may still identify the outer Windows SSH process, so turn the
 relevant setting off (or hold Shift for a drop) while working on the inner host.
 
 Run `wmux reload-config` after changing either value.
+
+## Pasted images
+
+A pasted image (a screenshot, or anything else copied as an image) is written to
+`%TEMP%\wmux\screenshot-<time>.png` and its path is typed into the pane, or
+uploaded first in an SSH pane (see above).
+
+```toml
+[paste]
+downscale-images = true
+```
+
+By default the image is first shrunk to the largest size, at the same aspect
+ratio, that Claude Code keeps when it sends an image to the model: a long edge of
+at most 2576 px, covering at most 4784 tiles of 28×28 px. Claude Code would
+resize a bigger image anyway, so those pixels only make the paste slower. An
+image that already fits is left untouched. Set `downscale-images = false` to keep
+the full resolution, for example when the file is meant for another program.
+
+The PNG is encoded for speed rather than size (no filtering, fast compression,
+off the UI thread), so it can be larger than one saved by an image editor.
 
 ## Key remaps
 

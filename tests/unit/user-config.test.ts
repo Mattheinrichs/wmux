@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { loadUserConfig, resetConfigWarnings } from '../../src/main/user-config';
 
 function writeTmp(contents: string): string {
@@ -142,6 +143,25 @@ describe('loadUserConfig', () => {
     const out = loadUserConfig(tmpPath);
     expect(out.remote).toEqual({ uploadOnPaste: false });
     expect(out.errors.some((e) => e.includes('remote.upload-on-drop'))).toBe(true);
+  });
+
+  // Issue #381 — the opt-out for downscaling a pasted image.
+  it('maps [paste] downscale-images', () => {
+    tmpPath = writeTmp(`
+      [paste]
+      downscale-images = false
+    `);
+    expect(loadUserConfig(tmpPath).paste).toEqual({ downscaleImages: false });
+  });
+
+  it('reports a non-boolean [paste] downscale-images', () => {
+    tmpPath = writeTmp(`
+      [paste]
+      downscale-images = "no"
+    `);
+    const bad = loadUserConfig(tmpPath);
+    expect(bad.paste).toBeUndefined();
+    expect(bad.errors.some((e) => e.includes('paste.downscale-images'))).toBe(true);
   });
 
   // Issue #146 — `[keys]` remaps: the config file is the plugin-shaped ask,
@@ -410,7 +430,7 @@ describe('[terminal] osc-title-tabs (issue #221)', () => {
   });
 
   function write(body: string): string {
-    const p = path.join(os.tmpdir(), `wmux-osc-title-${Date.now()}-${Math.random()}.toml`);
+    const p = path.join(os.tmpdir(), `wmux-osc-title-${Date.now()}-${randomUUID()}.toml`);
     fs.writeFileSync(p, body, 'utf8');
     return p;
   }
@@ -456,7 +476,7 @@ describe('[appearance] inactive-pane-dim', () => {
   });
 
   function write(body: string): string {
-    const p = path.join(os.tmpdir(), `wmux-pane-dim-${Date.now()}-${Math.random()}.toml`);
+    const p = path.join(os.tmpdir(), `wmux-pane-dim-${Date.now()}-${randomUUID()}.toml`);
     fs.writeFileSync(p, body, 'utf8');
     return p;
   }
@@ -534,7 +554,7 @@ describe('[sidebar] wrap-titles', () => {
   });
 
   function write(body: string): string {
-    const p = path.join(os.tmpdir(), `wmux-sidebar-${Date.now()}-${Math.random()}.toml`);
+    const p = path.join(os.tmpdir(), `wmux-sidebar-${Date.now()}-${randomUUID()}.toml`);
     fs.writeFileSync(p, body, 'utf8');
     return p;
   }
