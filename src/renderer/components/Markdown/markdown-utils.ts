@@ -57,6 +57,37 @@ export function renderMarkdown(content: string): string {
  * renderer is a separate Marked instance on purpose: this one also renders the
  * changelog (ChangelogSettings), where "$5" is prose and must stay prose.
  */
+/**
+ * Does this URL reach a NETWORK host through the file system? The packaged page
+ * is a `file://` origin, so a scheme-relative `//host/share/x.png` resolves to
+ * `file://host/...`, a UNC fetch, and Windows answers an SMB server's challenge
+ * with the user's NTLM hash — to whoever wrote the markdown. DOMPurify allows
+ * all of these spellings, and raw `<img>` HTML never goes through main's image
+ * reader (markdown-image.ts), which refuses them for markdown-syntax images.
+ * Browsers treat `\` as `/` in a special URL, hence the mixed slashes.
+ */
+export function isNetworkPathRef(value: string): boolean {
+  const v = value.trim().toLowerCase();
+  if (/^[\\/]{2}/.test(v)) return true;
+  const file = /^file:[\\/]*([^\\/]*)/.exec(v);
+  if (!file) return false;
+  // `file:///C:/x` and `file:/C:/x` have an empty host; `file://localhost/` is local too.
+  const host = file[1];
+  return /^file:[\\/]{2}/.test(v) && host !== '' && host !== 'localhost' && !/^[a-z]:$/.test(host);
+}
+
+/** Attributes the browser fetches on its own, with no click. */
+const AUTO_FETCH_ATTRS = new Set(['src', 'srcset', 'poster', 'background']);
+
+DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+  if (!AUTO_FETCH_ATTRS.has(data.attrName)) return;
+  // srcset is a list of "url descriptor" candidates; any one of them fetches.
+  const urls = data.attrName === 'srcset'
+    ? data.attrValue.split(',').map((c) => c.trim().split(/\s+/)[0] ?? '')
+    : [data.attrValue];
+  if (urls.some(isNetworkPathRef)) data.keepAttr = false;
+});
+
 export function sanitizeMarkdownHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
