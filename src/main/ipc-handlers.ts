@@ -36,7 +36,9 @@ import { saveNamedSession, loadNamedSession, listNamedSessions, deleteNamedSessi
 import { listDir, resolveInRoot, isExecutablePath } from './explorer-fs';
 import { readCodeFile, writeCodeFile } from './code-file';
 import { resolveTerminalFileLink } from './terminal-file-link';
-import { getExplorerRoot, forgetExplorerRoot } from './explorer-roots';
+import { getExplorerRoot, forgetExplorerRoot, reportExplorerCwd } from './explorer-roots';
+import { parseOsc7Cwd } from '../shared/osc7';
+import * as os from 'os';
 import { sessionWindows, toRestorePayload, restoreAnswerFor } from './session-windows';
 import { loadSettings, saveSetting } from './settings-store';
 import { notificationEffects } from './notification-effects';
@@ -1382,7 +1384,9 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
     // reaches explorer-roots' map in the first place — that is a property of
     // today's report_pwd sources, not of this gate. If a future cwd source
     // ever feeds a remote path in here, this check would need to widen past
-    // detect()'s null to catch that too.
+    // detect()'s null to catch that too. OSC 7 (#378) is such a source, and is
+    // why EXPLORER_REPORT_OSC7 refuses any host but this machine and any path
+    // but a local drive or a WSL root before it reaches the map.
     if (sshDetector.detect(surfaceId)) {
       return { error: 'This pane is inside an SSH session', code: 'remote' };
     }
@@ -1411,6 +1415,23 @@ export function registerIpcHandlers(windowManager: WindowManager, cdpProxyInstan
       return listDir(root.realRoot, typeof relPath === 'string' ? relPath : '', {
         showHidden: !!opts?.showHidden,
       });
+    },
+  );
+
+  // OSC 7 (#378): a shell announcing its directory through its own output —
+  // the only cwd a `wsl` typed into a PowerShell pane can report. Anything the
+  // terminal prints can forge it, so parseOsc7Cwd admits only this machine's
+  // drives and the WSL roots (a UNC path to another host would make Windows
+  // try SMB auth on realpath). Never inside ssh: that output is the remote's.
+  ipcMain.handle(
+    IPC_CHANNELS.EXPLORER_REPORT_OSC7,
+    (event, surfaceId: unknown, data: unknown): string | null => {
+      if (!ownsLiveSurface(surfaceId, event.sender) || typeof data !== 'string') return null;
+      if (sshDetector.detect(surfaceId)) return null;
+      const cwd = parseOsc7Cwd(data, os.hostname());
+      if (!cwd) return null;
+      reportExplorerCwd(surfaceId, cwd);
+      return cwd;
     },
   );
 

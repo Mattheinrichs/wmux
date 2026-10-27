@@ -422,6 +422,10 @@ contextBridge.exposeInMainWorld('wmux', {
       ipcRenderer.invoke(IPC_CHANNELS.EXPLORER_READ_MARKDOWN, surfaceId, relPath),
     resolveTerminalLink: (surfaceId: string, text: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RESOLVE_FILE_LINK, surfaceId, text),
+    // A pane's own OSC 7 cwd report (#378), forwarded RAW: main decides what
+    // it means. Resolves to the accepted Windows path, or null.
+    reportOsc7: (surfaceId: string, data: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPLORER_REPORT_OSC7, surfaceId, data),
   },
   code: {
     // Same rule as `explorer` above: a surfaceId and a RELATIVE path, never an

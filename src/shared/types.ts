@@ -913,6 +913,10 @@ export const IPC_CHANNELS = {
   EXPLORER_REVEAL: 'explorer:reveal',
   EXPLORER_OPEN_IN_APP: 'explorer:open-in-app',
   TERMINAL_RESOLVE_FILE_LINK: 'terminal:resolve-file-link',
+  // OSC 7 cwd report from a terminal's own output (#378). Takes the RAW
+  // payload: main parses and gates it, so the allow-list sits on the trusted
+  // side. Answers the accepted Windows path, or null.
+  EXPLORER_REPORT_OSC7: 'explorer:report-osc7',
   // Orchestration (wmux-orchestrator plugin state broadcast)
   ORCHESTRATION_UPDATE: 'orchestration:update',
   ORCHESTRATION_CLEAR: 'orchestration:clear',

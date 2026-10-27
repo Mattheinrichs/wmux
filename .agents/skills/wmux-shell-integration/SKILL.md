@@ -13,6 +13,13 @@ Scripts in `src/shell-integration/` (deployed to `resources/shell-integration/`)
 | `wmux-bash-integration.sh` | cwd, git branch/dirty, shell state, ports, OSC 133 A/B/C/D (bash + zsh) |
 | `wmux-cmd-integration.cmd` | Basic OSC 9 escape sequences, OSC 133 A/B (no C/D — cmd has no preexec seam, so they are not representable and are deliberately not faked) |
 
+**WSL has no script here.** A WSL shell reports its cwd in-band with OSC 7 (#378): the
+user adds a `PROMPT_COMMAND`/`precmd` one-liner (`docs/wsl-explorer.md`) that prints
+`file://localhost/<wslpath -w $PWD>`. The renderer forwards the raw payload to main
+(`explorer:report-osc7`) and `src/shared/osc7.ts` admits only local drives and
+`\\wsl.localhost\<distro>` / `\\wsl$\<distro>` — any other UNC host would make Windows try
+SMB auth when main realpaths it. Change that allow-list only with that in mind.
+
 `resources/shell-integration/` is a checked-in **byte-identical mirror**, enforced by
 `tests/unit/resources-sync.test.ts` (#168/#169) — editing a script without copying it
 there fails `npm test` AND ships the old file.

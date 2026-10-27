@@ -55,6 +55,7 @@ import { applyKeyRemap } from '../key-remaps';
 import { claimsKeyEvent } from '../utils/shortcut-binding';
 import { installXtermCompositionClauses } from '../utils/ime-composition';
 import { isConEmuSubcommand } from './osc9';
+import { applyOsc7Cwd } from '../utils/osc7-cwd';
 import { forgetSurface as forgetPromptLog, handlePromptMark, refreshHighlights } from '../utils/prompt-log';
 import {
   handleScroll as handleAnchorScroll,
@@ -1498,6 +1499,16 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
           title: parts[1],
         });
       }
+      return true;
+    });
+
+    // OSC 7: the shell's working directory, reported through its own output
+    // (#378) — how a WSL shell, which has no pipe and no WMUX_SURFACE_ID when
+    // `wsl` is typed into a PowerShell pane, moves the explorer. Forwarded raw;
+    // main decides whether the path is one wmux may act on.
+    terminal.parser.registerOscHandler(7, (data) => {
+      const surfaceId = ptyIdRef.current as SurfaceId;
+      if (surfaceId) void applyOsc7Cwd(surfaceId, data);
       return true;
     });
 
