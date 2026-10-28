@@ -15,14 +15,16 @@
 // workers early in environment teardown). The only thing that can still act is
 // ANOTHER process.
 //
-// So every quit arms one: wmux's own executable run as plain Node
-// (ELECTRON_RUN_AS_NODE — no window, no second wmux, and a GUI-subsystem exe so
-// no console flashes), detached, with a ~20-line inline script. It polls the
-// parent's pid and exits the moment the parent is gone, which on a healthy quit
-// is well under a second. Only a parent that outlives the deadline is
-// terminated — and then whatever it was stuck on no longer matters. Chromium's
-// child processes exit on their own once their browser process's IPC channel
-// breaks.
+// So every quit arms one, from `will-quit` in ./index: wmux's own executable
+// run as plain Node (ELECTRON_RUN_AS_NODE — no window, no second wmux, and a
+// GUI-subsystem exe so no console flashes), detached, with a ~20-line inline
+// script. It polls the parent's pid every 250 ms and exits the moment the
+// parent is gone, which on a healthy quit is well under a second. Only a parent
+// that outlives the deadline (`QUIT_TEARDOWN_BUDGET_MS + 15 s`, set by
+// ./index) is terminated — and then whatever it was stuck on no longer
+// matters. The kill is logged to main.log as `exit-watchdog killed=<pid>`.
+// Chromium's child processes exit on their own once their browser process's
+// IPC channel breaks.
 //
 // Deliberately not a .cmd or PowerShell helper: a hidden detached script that
 // kills a process is the dropper shape zip-updater.ts goes out of its way to

@@ -1,3 +1,8 @@
+/**
+ * Auto-save and restore of window state: the live `session.json` (written
+ * atomically, #214), the named sessions, the version-change Auto-backups
+ * (#113, #145) and the scheduled `Auto-save …` snapshots (#238).
+ */
 import fs from 'fs';
 import path from 'path';
 import { getAppDataDir } from '../shared/instance';
@@ -328,6 +333,10 @@ export function setLastSessionName(name: string): void {
  * from an *older* file, which is the only reason there was anything to recover.
  * An "Auto-backup" existed already but only fires on a version change, so
  * between two updates there is nothing behind the live file at all.
+ *
+ * Snapshots have no timer of their own: index.ts calls `maybeSnapshotSession`
+ * on every `session:save` it writes, and the 30 s auto-save tick is what drives
+ * those. A second timer would have a second idea of what the layout is.
  *
  * Three decisions, each of which the obvious implementation gets wrong:
  *

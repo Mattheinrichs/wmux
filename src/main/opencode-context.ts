@@ -1,3 +1,28 @@
+/**
+ * OpenCode integration: the wmux block in `~/.config/opencode/AGENTS.md`, and
+ * `resources/opencode-plugin/wmux.js` installed into `~/.config/opencode/plugin/`.
+ *
+ * Installing the plugin is gated on its `// wmux-plugin-version:` marker
+ * (`pluginNeedsUpdate` compares it verbatim), so any change to the plugin needs
+ * a bump or it reaches nobody — every broken install already has the old file
+ * on disk.
+ *
+ * Rules that bind the plugin file, explained there: it exports only
+ * `WmuxPlugin` and the default `{ id, server: WmuxPlugin, setup }` (#191, #271
+ * — OpenCode v1 calls every export as a factory, v2 rejects a file without
+ * `export default { id, effect | setup }`); `setupV2` maps v2's hooks and
+ * events onto the v1 handlers through `fromV2Event` and leaves
+ * `filesystem.changed` unmapped; v2's prompt-admission hook is the prompt
+ * log's only OpenCode producer (#304), and v1 has none. Verified against
+ * `@opencode/cli@2.0.24` and `opencode-ai@1.18.35` with an isolated
+ * `XDG_CONFIG_HOME`.
+ *
+ * The CLI-side (TUI) half is NOT installed here (#310): it must land in the
+ * environment that hosts the TUI, so `wmux opencode-tui`
+ * (src/cli/opencode-tui-install.ts) copies `wmux-tui.js` + `wmux-tui-core.js`
+ * to `<config>/plugins/wmux-cli/{tui,core}.js` from inside it. What that half
+ * reports, and from which events, is documented in those two files.
+ */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

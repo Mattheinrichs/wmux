@@ -1,3 +1,9 @@
+/**
+ * PTY lifecycle — create (keyed by surfaceId), write, resize, kill — and the
+ * shell resolution every pane create goes through: which executable a shell
+ * spec names, including an App Execution Alias (#299, see
+ * `appExecAliasTarget`), and the fallback chain when it does not resolve.
+ */
 import * as pty from 'node-pty';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -18,9 +24,10 @@ import { bashAlias, gitBashCandidates, isWslBashLauncher, isGitBashLauncher, GIT
 import { deliverStartupCommandsWhenReady } from './startup-commands';
 import { browserEnvFor, WSL_ENV_PASSTHROUGH } from './pane-browser-env';
 
-// Applied once, at load, before any PTY can exist — the exit callback it guards
-// is registered by node-pty inside pty.spawn(), so a later install would leave
-// every already-spawned pane on the unguarded path (issue #150).
+// Applied once, at load, before any PTY can exist, so no pane can exit before
+// the guard is in place (issue #150). node-pty 1.1.0 looks the exit callback up
+// through the prototype on every exit, so this ordering is about exits that
+// could otherwise happen first, not about panes spawned earlier.
 //
 // The result is kept rather than discarded so it can be RECORDED. "Installed at
 // module load" was a design claim nobody could check against a process that had
@@ -305,6 +312,9 @@ function resolveBashAlias(shell: string, alias: 'bash' | 'git-bash'): string | u
   // An honest PATH hit wins: an MSYS2 or Cygwin bash the user put on PATH on
   // purpose is what they mean by `bash`. The WSL launcher is not one — it is
   // on every PATH that has WSL, and it turns "Git Bash" into a Linux distro.
+  // Since #299 a PATH hit that is an App Execution Alias comes back as the exe
+  // behind it, so for WSL's alias `hit` is that exe rather than the alias;
+  // `isWslBashLauncher` matches it too, so the Git Bash rule (#252) still holds.
   const hit = alias === 'bash' ? shellProbe.onPath(shell) : undefined;
   if (hit && !isWslBashLauncher(hit, process.env.SystemRoot || 'C:\\Windows')) return hit;
   // The WSL launcher stays the last resort: it is still a bash, and a miss
