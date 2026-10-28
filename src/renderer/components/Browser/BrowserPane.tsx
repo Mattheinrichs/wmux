@@ -43,6 +43,19 @@ interface BrowserPaneProps {
    * that does the hiding says so.
    */
   visible?: boolean;
+  /**
+   * Focus this pane (#388). A click inside the page is handled by the guest
+   * process and never reaches the host DOM, so the split-tree leaf's onClick
+   * never sees it. The <webview> ELEMENT does receive DOM focus when the guest
+   * takes it, and that is the signal used here.
+   */
+  onActivate?: () => void;
+  /**
+   * Is this the focused pane? When another pane takes focus the webview is
+   * blurred, or it would stay `document.activeElement` and the next click
+   * into it would fire no `focus` event at all.
+   */
+  focused?: boolean;
 }
 
 /**
@@ -279,6 +292,8 @@ export default function BrowserPane({
   initialHistory,
   onHistoryChange,
   visible = true,
+  onActivate,
+  focused,
 }: BrowserPaneProps) {
   const keepRendering = useKeepRendering(surfaceId);
   // src is fixed to the initial page; all later navigation goes through loadURL
@@ -300,6 +315,8 @@ export default function BrowserPane({
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const webviewRef = useRef<any>(null);
+  const activateRef = useRef(onActivate);
+  activateRef.current = onActivate;
   const onHistoryChangeRef = useRef(onHistoryChange);
   onHistoryChangeRef.current = onHistoryChange;
   const lastHistoryRef = useRef<BrowserHistory | null>(null);
@@ -517,6 +534,21 @@ export default function BrowserPane({
     if (engineRef.current === 'agent') return;
     webviewRef.current?.executeJavaScript?.(popupBridgeSource()).catch(() => {});
   }, []);
+
+  // Clicking into the page focuses the pane (#388). See `onActivate`.
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    const onFocus = () => activateRef.current?.();
+    wv.addEventListener('focus', onFocus);
+    return () => wv.removeEventListener('focus', onFocus);
+  }, []);
+
+  useEffect(() => {
+    if (focused !== false) return;
+    const wv = webviewRef.current;
+    if (wv && document.activeElement === wv) wv.blur();
+  }, [focused]);
 
   // Last automatic recovery, so a page that crashes on load can't be reloaded in
   // a tight loop. One retry per RECOVERY_COOLDOWN_MS; after that the pane stays
