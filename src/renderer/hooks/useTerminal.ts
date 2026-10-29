@@ -26,7 +26,8 @@ import {
   isMouseTracking,
   takeMouseModeReplay,
 } from '../utils/mouse-modes';
-import { attachVisibleRenderer, RendererHandle } from '../utils/terminal-renderer';
+import { attachVisibleRenderer, rebuildVisibleRenderer, RendererHandle } from '../utils/terminal-renderer';
+import { WidthChangeRebuild } from '../utils/renderer-rebuild';
 import { terminalNeedsTransparency } from '../utils/terminal-theme';
 import { resetTerminalModes } from '../utils/terminal-reset';
 import { trackScreenEvents } from '../utils/screen-report';
@@ -954,6 +955,17 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
   // Read by the bell handler (#335), whose closure outlives every render.
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  // A settled column change replaces the WebGL renderer, as a hide/show does,
+  // because that is the only thing that repaired #400's stale glyphs. Read
+  // through refs: it fires after the resize that armed it, and only for a
+  // terminal that is still shown and still on WebGL.
+  const widthRebuildRef = useRef<WidthChangeRebuild | null>(null);
+  widthRebuildRef.current ??= new WidthChangeRebuild(() => {
+    const term = xtermRef.current;
+    const handle = rendererRef.current;
+    if (!term || !handle || !visibleRef.current) return;
+    rendererRef.current = rebuildVisibleRenderer(term, handle);
+  });
 
   // Subscribe to relevant settings so changes apply live.
   const prefs = useStore((s) => s.terminalPrefs);
@@ -1010,6 +1022,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
         // After captureViewportTop: a tail it orphans is where ConPTY's copy of
         // the cursor's line starts (#273, see captureCursorLine).
         const cursorLine = reflows ? captureCursorLine(term) : undefined;
+        const colsBefore = term?.cols;
         try {
           fitAddonRef.current.fit();
         } finally {
@@ -1020,6 +1033,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
           if (term) {
             restoreCursorLine(term, cursorLine);
             anchorViewportLikeConpty(term, top);
+            if (colsBefore !== undefined) widthRebuildRef.current?.noteFit(colsBefore, term.cols);
           }
         }
       } catch {
@@ -2033,6 +2047,7 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
       }
 
       // Release the GPU renderer (and its WebGL budget slot) before disposing
+      widthRebuildRef.current?.cancel();
       rendererRef.current?.dispose();
       rendererRef.current = null;
 
@@ -2234,7 +2249,11 @@ export function useTerminal({ surfaceId, shell, cwd, visible = true, focused = t
     // A hidden pane must not keep scrolling (#248): rAF would stall anyway, but
     // it would resume the fling on the way back into view — a pane that moves
     // by itself when the user returns to it.
-    if (!visible) cancelFlingRef.current?.();
+    if (!visible) {
+      cancelFlingRef.current?.();
+      // A hidden terminal has released WebGL; showing it again loads a fresh one.
+      widthRebuildRef.current?.cancel();
+    }
     // Track the nested rAFs so they can be cancelled if the terminal is hidden
     // or unmounted before they fire. Otherwise (notably under StrictMode's
     // double-mount) they run fit()/resize/refresh on a disposed terminal and

@@ -85,3 +85,16 @@ export function attachVisibleRenderer(terminal: Terminal): RendererHandle {
 
   return handle;
 }
+
+/**
+ * Replace a terminal's WebGL renderer with a fresh one, which is what a hide
+ * and show does (#400, see renderer-rebuild.ts). A DOM handle comes back as
+ * is: the DOM renderer rebuilds its rows on every refresh and has no model to
+ * go stale. Released before the new one is attached, so the swap never needs
+ * a second budget slot.
+ */
+export function rebuildVisibleRenderer(terminal: Terminal, handle: RendererHandle): RendererHandle {
+  if (handle.kind !== 'webgl') return handle;
+  handle.dispose();
+  return attachVisibleRenderer(terminal);
+}
