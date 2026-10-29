@@ -3,7 +3,11 @@
 //   workspace.open      {path, dryRun?, newCopy?}  → workspace-open.ts
 //   workspace.validate  {path}                     → errors / warnings / plan text
 //   workspace.export    {to, name?}                → the manifest to write
-//   workspace.list                                 → manifests trusted on this machine
+//   workspace.list_manifests                       → manifests trusted on this machine
+//
+// NOT `workspace.list`: that name is the bridge method behind `wmux
+// list-workspaces` (v2-bridge.ts), and routeSpecialV2 matches this set FIRST,
+// so reusing it made list-workspaces answer `{manifests: []}` (#398).
 //
 // None of these writes a file. `export` (behind `wmux workspace save`) RETURNS
 // the manifest and the CLI — running as the user, in the user's folder —
@@ -19,7 +23,7 @@ import { loadTrust } from './workspace-trust';
 import { waitFor, sleep } from './wait-probes';
 import type { ManifestWorkspaceSpec } from '../shared/types';
 
-export const WORKSPACE_MANIFEST_METHODS = new Set(['workspace.open', 'workspace.validate', 'workspace.export', 'workspace.list']);
+export const WORKSPACE_MANIFEST_METHODS = new Set(['workspace.open', 'workspace.validate', 'workspace.export', 'workspace.list_manifests']);
 
 export interface ManifestHostDeps {
   deliver(surfaceId: string, commands: string[]): boolean;
@@ -132,7 +136,7 @@ export function handleWorkspaceManifestV2(
   respondError: (code: number, message: string) => void,
   host: ManifestHostDeps,
 ): void {
-  if (method === 'workspace.list') {
+  if (method === 'workspace.list_manifests') {
     const trust = loadTrust();
     respond({ manifests: Object.entries(trust.manifests).map(([p, e]) => ({ path: p, trustedAt: e.trustedAt })) });
     return;

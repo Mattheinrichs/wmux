@@ -83,7 +83,7 @@ A manifest arrives with `git clone`, so wmux treats it as untrusted:
 wmux workspace open --dry-run          # print the resolved plan; run nothing
 wmux workspace validate [path]         # check the file
 wmux workspace save [--to <dir|file>]  # write the current workspace as a manifest
-wmux workspace list                    # manifests trusted on this machine
+wmux workspace list                    # manifests you chose to run on this machine (not your open workspaces: that is `wmux list-workspaces`)
 ```
 
 `save` writes each pane's folder and its **startup commands**. Set those on a live pane with a right-click on its tab → **Startup command…**. Those also run whenever that pane is restored, which is useful on its own, without a manifest.

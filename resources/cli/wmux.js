@@ -853,7 +853,7 @@ function printManifestResult(result) {
 async function cmdWorkspace(args) {
     const sub = args[1];
     if (sub === 'list') {
-        print(await sendV2('workspace.list', {}));
+        print(await sendV2('workspace.list_manifests', {}));
         return;
     }
     if (sub === 'save')
@@ -2071,7 +2071,8 @@ exports.COMMAND_SPECS = {
         usage: 'wmux workspace open [path] [--dry-run] [--new] [--json]   (bring up a wmux.workspace.json; asks before running anything)\n'
             + 'wmux workspace validate [path] [--json]\n'
             + 'wmux workspace save [--to <dir|file.json>] [--name N] [--workspace <id>] [--force] [--stdout]\n'
-            + 'wmux workspace list',
+            + 'wmux workspace list   (manifests you allowed to run on this machine; empty until you open one and choose to run it.\n'
+            + '                       Your open workspaces are `wmux list-workspaces`)',
         value: ['--to', '--name', '--workspace'],
         bool: ['--dry-run', '--new', '--json', '--force', '--stdout'],
         passthrough: true,
