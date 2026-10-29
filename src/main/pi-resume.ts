@@ -80,7 +80,9 @@ export function isValidPiSessionFile(file: unknown, sessionsDir = piSessionsDir(
   if (UNSAFE_PATH_CHARS.test(file)) return false;
   if (!file.toLowerCase().endsWith('.jsonl')) return false;
   if (/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(file)) return false;
-  if (file.startsWith('/')) return !file.startsWith('//');
+  // A Linux path is typed into a WSL shell inside single quotes, and fish honours
+  // \' and \\ there: a backslash could end the quoting. Pi never writes one.
+  if (file.startsWith('/')) return !file.startsWith('//') && !file.includes('\\');
   if (!/^[a-zA-Z]:[\\/]/.test(file)) return false;
   const rel = path.win32.relative(sessionsDir.toLowerCase(), path.win32.normalize(file).toLowerCase());
   return rel !== '' && !rel.startsWith('..') && !path.win32.isAbsolute(rel);

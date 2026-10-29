@@ -31,7 +31,7 @@ function isValidPiHandle(id: unknown): id is string {
   // eslint-disable-next-line no-control-regex -- matching control characters is the point
   if (/[\u0000-\u001f\u007f"]/.test(id)) return false;
   if (!id.toLowerCase().endsWith('.jsonl')) return false;
-  if (!/^[a-zA-Z]:[\\/]/.test(id) && !(id.startsWith('/') && !id.startsWith('//'))) return false;
+  if (!/^[a-zA-Z]:[\\/]/.test(id) && !(id.startsWith('/') && !id.startsWith('//') && !id.includes('\\'))) return false;
   return !/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(id);
 }
 
@@ -123,40 +123,58 @@ export function withClaudeResume(opts: {
   if (!surfaceId) return base;
   if (opts.piSessionFile) return withPiResume(base, surfaceId, opts);
   if (opts.qwenSessionId) return withQwenResume(base, surfaceId, opts);
-  if (opts.agySessionId) {
-    // One provider per tab, as for Codex and OpenCode.
-    if (claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.ompSessionId || !opts.agyEnabled) return base;
-    // Mirrors AGY_CONVERSATION_ID_RE in src/main/agy-resume.ts — re-checked
-    // because session.json is a file the user can edit.
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(opts.agySessionId)) return base;
-    return applyResume(base, surfaceId, 'agy', opts.agySessionId);
-  }
-  if (opts.opencodeSessionId) {
-    // Same rule as Codex: two providers' handles on one tab is a state nothing
-    // wrote on purpose, and guessing would type an agent into another's TUI.
-    if (claudeSessionId || opts.codexSessionId || opts.ompSessionId || !opts.opencodeEnabled) return base;
-    // Mirrors OPENCODE_SESSION_ID_RE in src/main/opencode-resume.ts — re-checked
-    // because session.json is a file the user can edit.
-    if (!/^ses_[A-Za-z0-9]{8,120}$/.test(opts.opencodeSessionId)) return base;
-    return applyResume(base, surfaceId, 'opencode', opts.opencodeSessionId);
-  }
-  if (opts.codexSessionId) {
-    // Mixed provider state is ambiguous: never type a second agent into a TUI.
-    if (claudeSessionId || opts.opencodeSessionId || opts.ompSessionId || !opts.codexEnabled || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(opts.codexSessionId)) return base;
-    return applyResume(base, surfaceId, 'codex', opts.codexSessionId);
-  }
-  if (opts.ompSessionId) {
-    // Mixed provider state is ambiguous: never type a second agent into a TUI.
-    if (claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId || opts.qwenSessionId || !opts.ompEnabled) return base;
-    if (!isValidOmpHandle(opts.ompSessionId)) return base;
-    return applyResume(base, surfaceId, 'omp', opts.ompSessionId, opts.shell);
-  }
+  if (opts.agySessionId) return withAgyResume(base, surfaceId, opts);
+  if (opts.opencodeSessionId) return withOpencodeResume(base, surfaceId, opts);
+  if (opts.codexSessionId) return withCodexResume(base, surfaceId, opts);
+  if (opts.ompSessionId) return withOmpResume(base, surfaceId, opts);
   if (!enabled || !claudeSessionId) return base;
   // Re-validated here even though the main process validates on the way in:
   // this value round-tripped through session.json, which is a file on disk the
   // user can edit, and it is about to become a command line.
   if (!SESSION_ID_RE.test(claudeSessionId)) return base;
   return applyResume(base, surfaceId, 'claude', claudeSessionId);
+}
+
+type ResumeOpts = Parameters<typeof withClaudeResume>[0];
+
+/** The Antigravity branch of {@link withClaudeResume}: one provider per tab, as for Codex and OpenCode. */
+function withAgyResume(base: string[] | undefined, surfaceId: string, opts: ResumeOpts): string[] | undefined {
+  const id = opts.agySessionId;
+  if (!id || opts.claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.ompSessionId || !opts.agyEnabled) return base;
+  // Mirrors AGY_CONVERSATION_ID_RE in src/main/agy-resume.ts — re-checked
+  // because session.json is a file the user can edit.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return base;
+  return applyResume(base, surfaceId, 'agy', id);
+}
+
+/**
+ * The OpenCode branch of {@link withClaudeResume}. Same rule as Codex: two
+ * providers' handles on one tab is a state nothing wrote on purpose, and
+ * guessing would type an agent into another's TUI.
+ */
+function withOpencodeResume(base: string[] | undefined, surfaceId: string, opts: ResumeOpts): string[] | undefined {
+  const id = opts.opencodeSessionId;
+  if (!id || opts.claudeSessionId || opts.codexSessionId || opts.ompSessionId || !opts.opencodeEnabled) return base;
+  // Mirrors OPENCODE_SESSION_ID_RE in src/main/opencode-resume.ts — re-checked
+  // because session.json is a file the user can edit.
+  if (!/^ses_[A-Za-z0-9]{8,120}$/.test(id)) return base;
+  return applyResume(base, surfaceId, 'opencode', id);
+}
+
+/** The Codex branch of {@link withClaudeResume}: mixed provider state is ambiguous, never type a second agent into a TUI. */
+function withCodexResume(base: string[] | undefined, surfaceId: string, opts: ResumeOpts): string[] | undefined {
+  const id = opts.codexSessionId;
+  if (!id || opts.claudeSessionId || opts.opencodeSessionId || opts.ompSessionId || !opts.codexEnabled) return base;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(id)) return base;
+  return applyResume(base, surfaceId, 'codex', id);
+}
+
+/** The omp branch of {@link withClaudeResume}: mixed provider state is ambiguous, never type a second agent into a TUI. */
+function withOmpResume(base: string[] | undefined, surfaceId: string, opts: ResumeOpts): string[] | undefined {
+  const id = opts.ompSessionId;
+  if (!id || opts.claudeSessionId || opts.codexSessionId || opts.opencodeSessionId || opts.agySessionId || opts.qwenSessionId || !opts.ompEnabled) return base;
+  if (!isValidOmpHandle(id)) return base;
+  return applyResume(base, surfaceId, 'omp', id, opts.shell);
 }
 
 /**

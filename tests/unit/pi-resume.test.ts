@@ -104,6 +104,7 @@ describe('#382 pi session file validation (the command-line boundary)', () => {
     ['another drive', 'D:\\pi-test\\agent\\sessions\\a.jsonl'],
     ['a POSIX network path', '//server/share/a.jsonl'],
     ['a POSIX traversal', '/home/user/.pi/agent/sessions/../auth.jsonl'],
+    ['a POSIX backslash (fish ends single quotes on it)', "/home/u/x\\';touch ~/pwned;echo \\'.jsonl"],
     ['a UNC path', '\\\\server\\share\\sessions\\a.jsonl'],
     ['a line break', `${SESSIONS}\\x\\a\n.jsonl`],
     ['a carriage return', `${SESSIONS}\\x\\a\r.jsonl`],
