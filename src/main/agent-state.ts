@@ -141,6 +141,23 @@ export interface AgentStateRecord {
   promptId: number;
   /** What the current prompt's answers were declared as, to tell a re-declaration from a new question. */
   choicesSig: string;
+  /**
+   * Who raised the current block (#399): `hook` when wmux inferred it from a
+   * Claude Code `Notification`, `declared` when the agent said so itself
+   * (`wmux report-agent --blocked`), null when not blocked.
+   *
+   * Only a `hook` block may be retracted by hook evidence that the agent moved
+   * past its prompt (`clearHookBlock`). A declared block is the agent's own
+   * claim and only the agent, the human, or the turn ending may retract it; it
+   * also wins over a hook re-report of the same block, never the reverse.
+   */
+  blockSource: 'hook' | 'declared' | null;
+  /**
+   * When the human last typed something that answers a prompt into this pane
+   * (#399), 0 for never. A hook block FIRED before this moment is already
+   * answered: see the race note in reportAgent.
+   */
+  lastAnswerInputAt: number;
 }
 
 let promptCounter = 0;
@@ -209,6 +226,8 @@ function blank(surfaceId: SurfaceId): AgentStateRecord {
     blockedSince: null,
     promptId: 0,
     choicesSig: '',
+    blockSource: null,
+    lastAnswerInputAt: 0,
   };
 }
 
@@ -320,6 +339,17 @@ export interface ReportAgentParams {
    * previously declared set alone; an empty array clears it.
    */
   choices?: AgentChoice[];
+  /**
+   * Internal, set by agent-hook-bridge.ts only and never read off the pipe:
+   * this report was inferred from a Claude Code hook, not declared by the agent.
+   */
+  fromHook?: boolean;
+  /**
+   * Internal, hook bridge only (#399): the agent has demonstrably moved past
+   * the prompt it was showing, so retract the block IF a hook raised it. A no-op
+   * for a block the agent declared itself.
+   */
+  clearHookBlock?: boolean;
 }
 
 /**
@@ -400,6 +430,8 @@ function applyBlocked(record: AgentStateRecord, params: ReportAgentParams): void
   // for permission: Bash" can't outlive the prompt it described.
   record.blockedReason = record.awaitingHuman ? (params.reason ?? null) : null;
 
+  record.blockSource = nextBlockSource(record, wasAwaiting, params);
+
   if (wasAwaiting !== record.awaitingHuman) {
     record.choices = [];
     record.choicesSig = '';
@@ -412,6 +444,21 @@ function applyBlocked(record: AgentStateRecord, params: ReportAgentParams): void
   } else if (record.awaitingHuman && record.blockedReason !== prevReason) {
     bumpPrompt(record);
   }
+}
+
+/**
+ * Who owns the block after a report that set `awaitingHuman`. A declared block
+ * outranks a hook's inference of the same block, so a hook report never
+ * downgrades one (see `blockSource`).
+ */
+function nextBlockSource(
+  record: AgentStateRecord,
+  wasAwaiting: boolean,
+  params: ReportAgentParams,
+): AgentStateRecord['blockSource'] {
+  if (!record.awaitingHuman) return null;
+  if (wasAwaiting && params.fromHook) return record.blockSource;
+  return params.fromHook ? 'hook' : 'declared';
 }
 
 /** Apply the declared answers. Omitted leaves them alone; an empty array clears them. */
@@ -452,14 +499,42 @@ export function reportAgent(surfaceId: SurfaceId, params: ReportAgentParams): Ag
   if (!acceptSeq(record, params.seq)) return null;
   if (!acceptHookAt(record, params.hookAt)) return null;
 
+  const effective = resolveHookBlock(record, params);
   // Order matters: applyBlocked may clear the answers of a prompt that has just
   // ended, and applyChoices then installs the ones declared for the new prompt.
   record.sessionOnly = false;
-  applyBlocked(record, params);
-  applyChoices(record, params);
-  applyRunDepth(record, params);
+  applyBlocked(record, effective);
+  applyChoices(record, effective);
+  applyRunDepth(record, effective);
 
   return commit(record);
+}
+
+/**
+ * The blocked half of a hook-sourced report, adjusted for what wmux knows that
+ * the hook did not (#399).
+ *
+ * - `clearHookBlock` becomes a real unblock, but only for a block a hook raised.
+ *   The agent declaring a question itself is a claim no tool event retracts.
+ *
+ * - A hook block FIRED before the human's last answering keystroke is dropped.
+ *   Each hook is its own node process, stamped at start, and on Windows it can
+ *   take a second or more to reach the pipe. A user who answers the permission
+ *   prompt inside that window types while the pane is not yet blocked, so
+ *   noteHumanInput has nothing to clear — and the block then lands after the
+ *   answer and stays until the turn ends. The keystroke came after Claude Code
+ *   showed the prompt (the stamp is taken after it), so it answered it.
+ */
+function resolveHookBlock(record: AgentStateRecord, params: ReportAgentParams): ReportAgentParams {
+  if (params.clearHookBlock && params.awaitingHuman === undefined
+    && record.awaitingHuman && record.blockSource === 'hook') {
+    return { ...params, awaitingHuman: false };
+  }
+  if (params.fromHook && params.awaitingHuman === true && params.hookAt !== undefined
+    && Number.isFinite(params.hookAt) && record.lastAnswerInputAt > params.hookAt) {
+    return { ...params, awaitingHuman: undefined, reason: undefined };
+  }
+  return params;
 }
 
 /** Who a session handle belongs to — it decides the validator and the restore command. */
@@ -766,11 +841,17 @@ export function noteHumanInput(surfaceId: SurfaceId, data: string): boolean {
   const record = records.get(surfaceId);
   if (!record) return false;
 
+  const answering = isAnsweringInput(data);
+  // Stamped whether or not the pane is blocked yet: a hook block can still be
+  // on its way to the pipe (#399, see resolveHookBlock).
+  if (answering) record.lastAnswerInputAt = Date.now();
+
   // Escape, alone, against a live run: the turn was cancelled. Clears the block
   // too — escaping a permission prompt dismisses the question with it.
   if (data === '\x1b' && record.runDepth > 0) {
     record.runDepth = 0;
     record.awaitingHuman = false;
+    record.blockSource = null;
     record.blockedReason = null;
     record.blockedSince = null;
     record.choices = [];
@@ -780,9 +861,10 @@ export function noteHumanInput(surfaceId: SurfaceId, data: string): boolean {
   }
 
   if (!record.awaitingHuman) return false;
-  if (!isAnsweringInput(data)) return false;
+  if (!answering) return false;
 
   record.awaitingHuman = false;
+  record.blockSource = null;
   record.blockedReason = null;
   record.blockedSince = null;
   record.choices = [];
@@ -968,6 +1050,15 @@ export function currentPromptView(surfaceId: SurfaceId): { reason: string | null
   const record = records.get(surfaceId);
   if (!record || resolveState(record, Date.now()) !== 'blocked') return null;
   return { reason: record.blockedReason, choices: record.choices.map(c => ({ id: c.id, label: c.label })) };
+}
+
+/**
+ * Who raised the pane's current block, or null when it is not blocked (#399).
+ * Kept off the snapshot like `currentPromptId`: only the hook bridge needs it.
+ */
+export function getBlockSource(surfaceId: SurfaceId): 'hook' | 'declared' | null {
+  const record = records.get(surfaceId);
+  return record?.awaitingHuman ? record.blockSource : null;
 }
 
 export function getAgentState(surfaceId: SurfaceId): AgentStateSnapshot | undefined {

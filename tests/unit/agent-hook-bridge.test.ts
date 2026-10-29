@@ -4,8 +4,8 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
 }));
 
-import { hookToAgentReport, applyHookToAgentState, hookEventName, resetHookBridge } from '../../src/main/agent-hook-bridge';
-import { getAgentState, resetAgentState } from '../../src/main/agent-state';
+import { hookToAgentReport, applyHookToAgentState, hookEventName, resetHookBridge, noteToolEvent, newToolLedger } from '../../src/main/agent-hook-bridge';
+import { getAgentState, resetAgentState, reportAgent, noteHumanInput } from '../../src/main/agent-state';
 import { SurfaceId } from '../../src/shared/types';
 
 const surf = 'surf-hook-1' as SurfaceId;
@@ -359,5 +359,176 @@ describe('Notification kinds (issue #253)', () => {
     applyHookToAgentState(surf, 'Notification', 'Claude needs your permission to use Bash', 2000, 'permission_prompt');
     applyHookToAgentState(surf, 'Notification', 'Claude is waiting for your input', 62000, 'idle_prompt');
     expect(getAgentState(surf)).toMatchObject({ state: 'blocked', blockedReason: 'Claude needs your permission to use Bash' });
+  });
+});
+
+describe('a permission prompt the agent moved past (issue #399)', () => {
+  const PERMISSION = 'Claude needs your permission to use Bash';
+  const main = (toolUseId: string) => ({ toolUseId });
+  const sub = (toolUseId: string) => ({ toolUseId, agentId: 'agent-1' });
+
+  /** A turn whose main thread starts `toolu_A`, which then asks for permission. */
+  function promptOnA(): void {
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 1000);
+    applyHookToAgentState(surf, 'PreToolUse', null, 2000, null, main('toolu_A'));
+    applyHookToAgentState(surf, 'Notification', PERMISSION, 3000, 'permission_prompt');
+    expect(getAgentState(surf)).toMatchObject({ state: 'blocked', blockedReason: PERMISSION });
+  }
+
+  it('the approved tool finishing clears the block, with no keystroke (auto mode)', () => {
+    promptOnA();
+    applyHookToAgentState(surf, 'PostToolUse', null, 90_000, null, main('toolu_A'));
+    expect(getAgentState(surf)).toMatchObject({ state: 'working', blockedReason: null });
+  });
+
+  it('the main thread starting its next tool clears the block', () => {
+    promptOnA();
+    applyHookToAgentState(surf, 'PreToolUse', null, 4000, null, main('toolu_B'));
+    expect(getAgentState(surf)).toMatchObject({ state: 'working', blockedReason: null });
+  });
+
+  it('a subagent tool event does not clear it (the #151 rule stands)', () => {
+    promptOnA();
+    applyHookToAgentState(surf, 'PreToolUse', null, 4000, null, sub('toolu_S'));
+    applyHookToAgentState(surf, 'PostToolUse', null, 5000, null, sub('toolu_S'));
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+
+  it('a tool event without a tool_use_id does not clear it', () => {
+    promptOnA();
+    applyHookToAgentState(surf, 'PreToolUse', null, 4000);
+    applyHookToAgentState(surf, 'PostToolUse', null, 5000);
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+
+  it('a sibling call in the same batch finishing does not clear it', () => {
+    // Read and Bash started together; Bash asks. Read finishing proves nothing
+    // about Bash, so the block holds until Bash has finished too.
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 1000);
+    applyHookToAgentState(surf, 'PreToolUse', null, 2000, null, main('toolu_Read'));
+    applyHookToAgentState(surf, 'PreToolUse', null, 2001, null, main('toolu_Bash'));
+    applyHookToAgentState(surf, 'Notification', PERMISSION, 3000, 'permission_prompt');
+
+    applyHookToAgentState(surf, 'PostToolUse', null, 4000, null, main('toolu_Read'));
+    expect(getAgentState(surf)?.state).toBe('blocked');
+
+    applyHookToAgentState(surf, 'PostToolUse', null, 9000, null, main('toolu_Bash'));
+    expect(getAgentState(surf)?.state).toBe('working');
+  });
+
+  it('a start that fired before the prompt but arrived after it does not clear it', () => {
+    // The PreToolUse hook is async; its process can lose the race to the
+    // synchronous Notification. Its stamp says it was already in flight.
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 1000);
+    applyHookToAgentState(surf, 'Notification', PERMISSION, 3000, 'permission_prompt');
+    applyHookToAgentState(surf, 'PreToolUse', null, 2000, null, main('toolu_A'));
+    expect(getAgentState(surf)?.state).toBe('blocked');
+
+    // And it is the call the prompt waits on: its finish is the evidence.
+    applyHookToAgentState(surf, 'PostToolUse', null, 8000, null, main('toolu_A'));
+    expect(getAgentState(surf)?.state).toBe('working');
+  });
+
+  it('a call that finished before the prompt does not clear it', () => {
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 1000);
+    applyHookToAgentState(surf, 'PreToolUse', null, 2000, null, main('toolu_A'));
+    applyHookToAgentState(surf, 'Notification', PERMISSION, 3000, 'permission_prompt');
+    applyHookToAgentState(surf, 'PostToolUse', null, 2500, null, main('toolu_A'));
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+
+  it('the clear stands even when its report lost the wall-clock gate', () => {
+    promptOnA();
+    // A newer hook already landed (a subagent's), so the main thread's
+    // PostToolUse is older than lastHookAt and its report is dropped. The
+    // evidence was ordered against the block, not against that report.
+    applyHookToAgentState(surf, 'PostToolUse', null, 9000, null, sub('toolu_S'));
+    applyHookToAgentState(surf, 'PostToolUse', null, 8000, null, main('toolu_A'));
+    expect(getAgentState(surf)?.state).toBe('working');
+  });
+
+  it('never retracts a block the agent declared itself', () => {
+    // `wmux report-agent --blocked`, run by the agent through its own Bash tool:
+    // that call's PostToolUse lands after the declaration and must not undo it.
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 1000);
+    applyHookToAgentState(surf, 'PreToolUse', null, 2000, null, main('toolu_A'));
+    reportAgent(surf, { awaitingHuman: true, reason: 'Which database?' });
+    applyHookToAgentState(surf, 'PostToolUse', null, 3000, null, main('toolu_A'));
+    applyHookToAgentState(surf, 'PreToolUse', null, 4000, null, main('toolu_B'));
+    expect(getAgentState(surf)).toMatchObject({ state: 'blocked', blockedReason: 'Which database?' });
+  });
+
+  it('a hook re-report does not downgrade a declared block', () => {
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 1000);
+    reportAgent(surf, { awaitingHuman: true, reason: 'Which database?' });
+    applyHookToAgentState(surf, 'Notification', PERMISSION, 3000, 'permission_prompt');
+    applyHookToAgentState(surf, 'PreToolUse', null, 4000, null, main('toolu_B'));
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+
+  it('a turn boundary forgets the calls of the turn before', () => {
+    promptOnA();
+    applyHookToAgentState(surf, 'Stop', null, 5000);
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, 6000);
+    applyHookToAgentState(surf, 'Notification', PERMISSION, 7000, 'permission_prompt');
+    // toolu_A belonged to the last turn; its late finish is no evidence now.
+    applyHookToAgentState(surf, 'PostToolUse', null, 8000, null, main('toolu_A'));
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+});
+
+describe('a permission prompt answered before its hook arrived (issue #399)', () => {
+  it('a keystroke after the Notification fired keeps its late block from landing', () => {
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, Date.now() - 5000);
+    const firedAt = Date.now() - 1000;
+    // The user pressed Enter on the prompt while the hook process was booting.
+    expect(noteHumanInput(surf, '\r')).toBe(false);
+    applyHookToAgentState(surf, 'Notification', 'Claude needs your permission to use Bash', firedAt, 'permission_prompt');
+    expect(getAgentState(surf)?.state).toBe('working');
+  });
+
+  it('a keystroke from before the Notification fired does not swallow it', () => {
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, Date.now() - 5000);
+    noteHumanInput(surf, 'x');
+    applyHookToAgentState(surf, 'Notification', 'Claude needs your permission to use Bash', Date.now() + 1000, 'permission_prompt');
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+
+  it('navigation keys are not an answer', () => {
+    applyHookToAgentState(surf, 'UserPromptSubmit', null, Date.now() - 5000);
+    const firedAt = Date.now() - 1000;
+    noteHumanInput(surf, '\x1b[A');
+    applyHookToAgentState(surf, 'Notification', 'Claude needs your permission to use Bash', firedAt, 'permission_prompt');
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+
+  it('only a hook block is subject to it, not one the agent declares', () => {
+    reportAgent(surf, { runDepth: 1 });
+    noteHumanInput(surf, '\r');
+    reportAgent(surf, { awaitingHuman: true, reason: 'Which database?' });
+    expect(getAgentState(surf)?.state).toBe('blocked');
+  });
+});
+
+describe('noteToolEvent', () => {
+  it('reports nothing while no block is watched', () => {
+    const ledger = newToolLedger();
+    expect(noteToolEvent(ledger, 'PreToolUse', 'a', 1)).toBe(false);
+    expect(noteToolEvent(ledger, 'PostToolUse', 'a', 2)).toBe(false);
+    expect(ledger.inFlight.size).toBe(0);
+  });
+
+  it('a start that loses the race to its own finish is not left in flight', () => {
+    const ledger = newToolLedger();
+    noteToolEvent(ledger, 'PostToolUse', 'a', 2);
+    noteToolEvent(ledger, 'PreToolUse', 'a', 1);
+    expect(ledger.inFlight.has('a')).toBe(false);
+  });
+
+  it('with nothing in flight at the prompt, only a new start is evidence', () => {
+    const ledger = newToolLedger();
+    ledger.block = { at: 10, tools: new Set() };
+    expect(noteToolEvent(ledger, 'PostToolUse', 'x', 20)).toBe(false);
+    expect(noteToolEvent(ledger, 'PreToolUse', 'y', 21)).toBe(true);
   });
 });

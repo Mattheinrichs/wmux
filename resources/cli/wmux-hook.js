@@ -425,7 +425,7 @@ function adaptQwenFields(data, out) {
 function parsePayload(raw) {
     const out = {
         file: '', message: '', sessionId: '', toolName: '', prompt: '', notificationType: '', subagent: false,
-        agentId: '', agentType: '', bgTask: '', bgTaskDetail: '', bgTasksEnded: '', freshSession: false,
+        agentId: '', agentType: '', toolUseId: '', bgTask: '', bgTaskDetail: '', bgTasksEnded: '', freshSession: false,
     };
     if (!raw.trim())
         return out;
@@ -491,6 +491,11 @@ function readPayloadFields(data, out) {
         if (typeof data.agent_type === 'string' && AGENT_IDENT_RE.test(data.agent_type))
             out.agentType = data.agent_type;
     }
+    // Not from a Grok subagent's own session: it carries no `agent_id`, so wmux
+    // would take its tool calls for the main thread's (#399).
+    if (!out.subagent && typeof data.tool_use_id === 'string' && AGENT_IDENT_RE.test(data.tool_use_id)) {
+        out.toolUseId = data.tool_use_id;
+    }
     // UserPromptSubmit carries what the user actually typed, and wmux threw it
     // away — which is why the prompt-log features in issue #207 had no source of
     // truth for an agent pane. It cannot be recovered from the screen: an agent
@@ -539,10 +544,10 @@ function reportedEvent(fired, subagent) {
 }
 /** The `hook.event` params: only the fields that carry something. */
 function hookParams(fields) {
-    const { file, message, sessionId, prompt, notificationType, agentId, agentType, bgTask, bgTaskDetail, bgTasksEnded } = fields;
+    const { file, message, sessionId, prompt, notificationType, agentId, agentType, toolUseId, bgTask, bgTaskDetail, bgTasksEnded } = fields;
     const params = { at: firedAt };
     const optional = {
-        event, tool, file, message, notificationType, prompt, agentId, agentType, surfaceId,
+        event, tool, file, message, notificationType, prompt, agentId, agentType, toolUseId, surfaceId,
         bgTask, bgTaskDetail, bgTasksEnded, freshSession: fields.freshSession ? '1' : '',
         // Not under Grok (it sets GROK_HOOK_EVENT on every hook process). Grok
         // 1.0.44 sends `session_id` alongside `sessionId`, and an id recorded here

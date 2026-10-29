@@ -78,7 +78,7 @@ import {
   applyExternalActivity, markSubagentStop, markAllAgentsDone, reportSubagent, endDeclaredSubagents,
 } from './claude-observer';
 import { handleAgentStateV2, setAnswerWriter, deliverAnswer } from './agent-state-rpc';
-import { applyHookToAgentState, hookEventName } from './agent-hook-bridge';
+import { applyHookToAgentState, hookEventName, type HookOrigin } from './agent-hook-bridge';
 import { startOrchestrationWatcher } from './orchestration-watcher';
 import { readMarkdownFile } from './markdown-file';
 import { grantFilePath, clearFileGrants } from './file-grants';
@@ -1260,6 +1260,14 @@ function pushDiffUpdate(file: string): void {
   }
 }
 
+/** The `hook.event` fields that say which thread and which tool call fired it (#399). */
+function hookOrigin(params: any): HookOrigin {
+  return {
+    agentId: typeof params.agentId === 'string' ? params.agentId : null,
+    toolUseId: typeof params.toolUseId === 'string' ? params.toolUseId : null,
+  };
+}
+
 /** One Claude Code hook event, fanned out to every consumer that wants it. */
 function handleHookEvent(params: any): void {
   BrowserWindow.getAllWindows().forEach(w => {
@@ -1283,6 +1291,9 @@ function handleHookEvent(params: any): void {
       Number.isFinite(params.at) ? Number(params.at) : undefined,
       // Tells the idle reminder from a real prompt (issue #253).
       typeof params.notificationType === 'string' ? params.notificationType : null,
+      // Whose tool event this is, so a main-thread call moving past a
+      // permission prompt can retract the block a hook raised (#399).
+      hookOrigin(params),
     );
   }
 
