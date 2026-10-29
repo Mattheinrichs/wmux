@@ -1429,11 +1429,11 @@ function deliverPaneNotice(surfaceId: string, key: string): void {
     if (win.webContents.isLoading()) {
       win.webContents.once('did-finish-load', () => {
         if (!win.isDestroyed()) {
-          void win.webContents.executeJavaScript(script).catch(() => {});
+          win.webContents.executeJavaScript(script).catch(() => {});
         }
       });
     } else {
-      void win.webContents.executeJavaScript(script).catch(() => {});
+      win.webContents.executeJavaScript(script).catch(() => {});
     }
   };
 
@@ -1863,6 +1863,15 @@ app.whenReady().then(() => {
     // credentials into a web context for nothing. The agent LABEL derived from
     // it does cross, on its own channel; the command line never does.
     if (cmd.command === 'report_command') return;
+    // A notify from a process that outlived its pane (a detached job that
+    // inherited WMUX_SURFACE_ID) names a surface no window owns. Since #392
+    // each window keeps only notifications for surfaces it owns, so that one
+    // would be dropped everywhere; sent surface-less, the active workspace
+    // takes it as before. Only main knows which surfaces still exist.
+    if (cmd.command === 'notify' && cmd.surfaceId && !ptyManager.has(cmd.surfaceId as SurfaceId)) {
+      broadcastMetadataUpdate({ ...cmd, surfaceId: '' });
+      return;
+    }
     broadcastMetadataUpdate(cmd);
   });
 
