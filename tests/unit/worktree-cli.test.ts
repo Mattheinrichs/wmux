@@ -117,6 +117,18 @@ describe('CLI worktree flags and parameter validation', () => {
       expect(mockProbe).not.toHaveBeenCalled();
       expect(mockCreate).not.toHaveBeenCalled();
     });
+
+    // #397: a Windows pane never takes a POSIX workspace cwd, so a workspace
+    // created on one must name WSL or it would open PowerShell at home.
+    it('opens a workspace created on a POSIX folder with WSL panes', async () => {
+      const posix = await (window as any).__wmux_createWorkspace({ cwd: '/home/u/proj' });
+      const named = await (window as any).__wmux_createWorkspace({ cwd: '/home/u/proj', shell: 'pwsh.exe' });
+      const win = await (window as any).__wmux_createWorkspace({ cwd: 'C:\\repo' });
+      const shellOf = (id: string) => useStore.getState().workspaces.find((w) => w.id === id)?.shell;
+      expect(shellOf(posix.workspaceId)).toBe('wsl.exe');
+      expect(shellOf(named.workspaceId)).toBe('pwsh.exe');
+      expect(shellOf(win.workspaceId)).toBe('');
+    });
   });
 
   describe('base ref validation', () => {

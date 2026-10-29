@@ -542,10 +542,47 @@ export function buildShellArgs(
     // --cd is BEST-EFFORT: WSL applies it before the interactive login shell
     // reads its rc, so a distro whose /etc/profile or ~/.profile cds to $HOME
     // discards it and the pane opens at home. See docs/config.md.
-    const reportedCwd = cwd && (isPosixPath(cwd) || path.win32.isAbsolute(cwd));
-    return ['--cd', reportedCwd ? cwd : '~'];
+    return ['--cd', wslCdArg(cwd)];
   }
   return [];
+}
+
+function nonBlankCommands(commands: readonly unknown[] | undefined): string[] {
+  return (commands ?? []).filter((cmd): cmd is string => typeof cmd === 'string' && cmd.trim().length > 0);
+}
+
+/**
+ * A WSL spec that fell back to another shell, or resolved to something that is
+ * not WSL: its startup commands are not typed (#395). The fallback can change
+ * the shell language, or drop the requested distro's arguments.
+ */
+function lostRequestedWsl(requestedCommand: string, resolved: string | undefined, shellType: string): boolean {
+  return getShellType(requestedCommand) === 'wsl' && (resolved === undefined || shellType !== 'wsl');
+}
+
+const WSL_UNC_RE =/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+(\\.*)?$/i;
+
+/**
+ * What `wsl --cd` gets for a saved cwd. wsl.exe EXITS (ERROR_FILE_NOT_FOUND /
+ * ERROR_PATH_NOT_FOUND) on a Windows-spelled directory that does not exist, so
+ * the restored pane never starts, while a missing POSIX path only lands in `/`.
+ * So a WSL UNC path becomes its POSIX spelling (no stat, which could wake the
+ * distro), a drive path is passed only if it still exists, and anything else
+ * opens at the distro home.
+ */
+function wslCdArg(cwd: string | undefined): string {
+  if (!cwd) return '~';
+  if (isPosixPath(cwd)) return cwd;
+  const unc = WSL_UNC_RE.exec(cwd);
+  if (unc) return (unc[1] || '\\').replace(/\\/g, '/');
+  if (/^[a-zA-Z]:[\\/]/.test(cwd)) {
+    try {
+      if (fs.statSync(cwd).isDirectory()) return cwd;
+    } catch {
+      // gone or unreadable: fall through to the distro home
+    }
+  }
+  return '~';
 }
 
 /**
@@ -656,6 +693,13 @@ export class PtyManager {
   private static readonly CHUNK_THRESHOLD = 1024;
   private static readonly CHUNK_SIZE = 1024;
 
+  /** The live PTY already registered under this surface id, as a create() answer. */
+  private reuseLive(surfaceId: SurfaceId | undefined): CreateResult | null {
+    const existing = surfaceId ? this.ptys.get(surfaceId) : undefined;
+    if (!surfaceId || !existing?.alive) return null;
+    return { id: surfaceId, shell: existing.shell, startupCommandsConsumed: existing.startupConsumed, reused: true };
+  }
+
   create(options: CreateOptions): CreateResult {
     const id: SurfaceId = options.surfaceId ?? `surf-${uuidv4()}` as SurfaceId;
 
@@ -665,17 +709,8 @@ export class PtyManager {
     // this guard the second call spawns a SECOND PowerShell process under the
     // same id: both stream to the renderer (doubled prompt + every keystroke
     // echoed twice) and the first leaks as an orphan. Reuse the live PTY instead.
-    if (options.surfaceId) {
-      const existing = this.ptys.get(options.surfaceId);
-      if (existing && existing.alive) {
-        return {
-          id: options.surfaceId,
-          shell: existing.shell,
-          startupCommandsConsumed: existing.startupConsumed,
-          reused: true,
-        };
-      }
-    }
+    const reused = this.reuseLive(options.surfaceId);
+    if (reused) return reused;
 
     // Split "ssh user@host"-style specs into executable + args (issue #78).
     // Extra args only apply when the REQUESTED executable resolved — if we fell
@@ -763,12 +798,8 @@ export class PtyManager {
     // the race: they run during init and the first prompt render — the only one
     // that triggers the leaky query — happens afterward, exactly as it does for a
     // plain terminal that shows no junk.
-    const requestedStartupCommands = (options.startupCommands ?? []).filter(
-      (cmd): cmd is string => typeof cmd === 'string' && cmd.trim().length > 0,
-    );
-    // A fallback can change shell language or drop the requested WSL distro arguments.
-    const startupCommands = getShellType(spec.command) === 'wsl' && (requested === undefined || shellType !== 'wsl')
-      ? [] : requestedStartupCommands;
+    const requestedStartupCommands = nonBlankCommands(options.startupCommands);
+    const startupCommands = lostRequestedWsl(spec.command, requested, shellType) ? [] : requestedStartupCommands;
     //
     // Every other shell (cmd, bash, WSL, PowerShell without the integration)
     // has no such seam and gets them TYPED — but by this class, gated on the

@@ -628,12 +628,30 @@ describe('comparePackageVersion (WindowsApps package ordering)', () => {
 
 
 describe('WSL launch cwd', () => {
+  it('passes a POSIX path directly to WSL', () => {
+    expect(buildShellArgs('wsl', {}, '', '/home/user/project')).toEqual(['--cd', '/home/user/project']);
+  });
+
+  it('passes a Windows directory that exists', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wmux wsl-cd '));
+    try {
+      expect(buildShellArgs('wsl', {}, '', dir)).toEqual(['--cd', dir]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // wsl.exe exits on a missing Windows-spelled --cd, so the pane would never start.
+  it('opens a Windows directory that is gone at the distro home', () => {
+    expect(buildShellArgs('wsl', {}, '', 'C:\\wmux-no-such-dir-397\\x')).toEqual(['--cd', '~']);
+  });
+
   it.each([
-    '/home/user/project',
-    'C:\\Users\\First Last\\project',
-    '\\\\wsl.localhost\\Ubuntu\\home\\user\\project',
-  ])('passes the saved path directly to WSL: %s', (cwd) => {
-    expect(buildShellArgs('wsl', {}, '', cwd)).toEqual(['--cd', cwd]);
+    ['\\\\wsl.localhost\\Ubuntu\\home\\user\\project', '/home/user/project'],
+    ['\\\\wsl$\\Ubuntu-24.04\\srv\\app', '/srv/app'],
+    ['\\\\wsl.localhost\\Ubuntu', '/'],
+  ])('passes a WSL UNC path in its POSIX spelling: %s', (cwd, posix) => {
+    expect(buildShellArgs('wsl', {}, '', cwd)).toEqual(['--cd', posix]);
   });
 
   it.each([undefined, '~', '%USERPROFILE%\\projects', 'C:relative', '   '])(
